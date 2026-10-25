@@ -44,6 +44,24 @@ class YouTubeAudio
             return $url;
         }
 
+        // Un seul yt-dlp à la fois : il réécrit cookies.txt, et le navigateur envoie souvent plusieurs
+        // requêtes pour le même titre (plages, préchargement du suivant). Les autres attendent son résultat.
+        return Cache::lock('ytdlp:run', 120)->block(60, function () use ($id, $key) {
+            if ($url = Cache::get($key)) {
+                return $url;
+            }
+            try {
+                return $this->resolve($id, $key);
+            } catch (RuntimeException $e) {
+                logger()->warning("yt-dlp {$id}, nouvel essai : ".$e->getMessage());
+
+                return $this->resolve($id, $key);
+            }
+        });
+    }
+
+    private function resolve(string $id, string $key): string
+    {
         $result = $this->process(45)->run([
             config('services.ytdlp.bin'),
             '--force-ipv4', // l'URL est liée à l'IP : le relais doit sortir par la même (voir StreamController)

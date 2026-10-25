@@ -74,6 +74,18 @@ class YouTubeStreamTest extends TestCase
         $this->withHeader('Range', 'bytes=9000000-')->get('/api/stream/youtube/'.self::ID)->assertStatus(416);
     }
 
+    public function test_ytdlp_is_retried_once_after_a_failure(): void
+    {
+        Process::fake(['*' => Process::sequence()
+            ->push(Process::result(output: '2026.10.21'))
+            ->push(Process::result(exitCode: 1, errorOutput: 'ERROR: HTTP Error 503'))
+            ->push(Process::result(output: self::URL))]);
+        $this->fakeGoogleVideo();
+
+        $this->withHeader('Range', 'bytes=0-1')->get('/api/stream/youtube/'.self::ID)->assertStatus(206);
+        Process::assertRanTimes(fn ($p) => in_array('--get-url', $p->command), 2);
+    }
+
     public function test_ytdlp_failure_returns_502_and_bad_ids_404(): void
     {
         Process::fake(['*' => Process::result(output: '2026.10.21')]);
