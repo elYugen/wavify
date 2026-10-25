@@ -4,7 +4,7 @@ import { Artwork } from './Artwork';
 /** Disque vinyle dont l'étiquette est la pochette ; tourne pendant la lecture. */
 export function Vinyl({ track, spinning, className = '' }: { track: Track | null; spinning: boolean; className?: string }) {
   return (
-    <div className={`vinyl relative aspect-square rounded-full ${className}`}>
+    <div className={`vinyl aspect-square rounded-full ${/\b(absolute|fixed)\b/.test(className) ? '' : 'relative'} ${className}`}>
       <div className={`absolute inset-0 rounded-full ${spinning ? 'spin-slow' : 'spin-slow [animation-play-state:paused]'}`}>
         <div className="absolute inset-[31%] overflow-hidden rounded-full ring-4 ring-black/40">
           <Artwork track={track} rounded="rounded-full" className="size-full" />

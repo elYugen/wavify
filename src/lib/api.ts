@@ -31,3 +31,11 @@ export function fetchSpotify(url: string) {
 export function audiusStreamUrl(id: string) {
   return `https://api.audius.co/v1/tracks/${encodeURIComponent(id)}/stream?app_name=wavify-pwa`;
 }
+
+export async function spotifyApiEnabled() {
+  try {
+    return (await getJson<{ api: boolean }>('/api/spotify-status')).api;
+  } catch {
+    return false;
+  }
+}

@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, CircleAlert, ClipboardPaste, LoaderCircle, Search as SearchIcon, X } from 'lucide-react';
+import { Check, CircleAlert, ClipboardPaste, FileUp, Info, LoaderCircle, Search as SearchIcon, X } from 'lucide-react';
 import type { Source, SpotifyImport, Track } from '../types';
-import { fetchSpotify } from '../lib/api';
+import { fetchSpotify, spotifyApiEnabled } from '../lib/api';
+import { csvToImport } from '../lib/csv';
 import { matchTrack, pool } from '../lib/match';
 import { useLibrary } from '../store/library';
 import { usePlayer } from '../store/player';
@@ -13,6 +14,8 @@ import { SourceTabs } from '../components/SourceTabs';
 import { Artwork } from '../components/Artwork';
 
 type Status = 'pending' | 'searching' | 'found' | 'missing';
+
+const LIST_MAX = 150; // au-delà, on n'affiche que les titres à problème
 
 export default function Import() {
   const [url, setUrl] = useState('');
@@ -25,6 +28,30 @@ export default function Import() {
   const [playlistId, setPlaylistId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const abort = useRef<AbortController | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [apiOn, setApiOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    spotifyApiEnabled().then(setApiOn);
+  }, []);
+
+  const load = (d: SpotifyImport) => {
+    if (!d.tracks.length) throw new Error('Cette playlist est vide');
+    setData(d);
+    setStatuses(d.tracks.map(() => 'pending'));
+    setMatches(d.tracks.map(() => null));
+  };
+
+  const onCsv = async (file?: File) => {
+    if (!file) return;
+    setError(null);
+    setPlaylistId(null);
+    try {
+      load(csvToImport(await file.text(), file.name));
+    } catch (e: any) {
+      setData(null);
+      setError(e.message);
+    }
+  };
   const { createPlaylist, updatePlaylist } = useLibrary();
   const playQueue = usePlayer((s) => s.playQueue);
 
@@ -35,11 +62,7 @@ export default function Import() {
     setData(null);
     setPlaylistId(null);
     try {
-      const d = await fetchSpotify(value.trim());
-      if (!d.tracks.length) throw new Error('Cette playlist est vide');
-      setData(d);
-      setStatuses(d.tracks.map(() => 'pending'));
-      setMatches(d.tracks.map(() => null));
+      load(await fetchSpotify(value.trim()));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -63,7 +86,7 @@ export default function Import() {
     setRunning(true);
     const id = createPlaylist(data.name, {
       description: `Importée de Spotify${data.owner ? ` · ${data.owner}` : ''}`,
-      importedFrom: url,
+      importedFrom: data.via === 'csv' ? `csv:${data.id}` : url,
     });
     setPlaylistId(id);
     const found: (Track | null)[] = data.tracks.map(() => null);
@@ -77,7 +100,7 @@ export default function Import() {
     };
     await pool(
       data.tracks,
-      3,
+      4,
       async (t, i) => {
         st[i] = 'searching';
         setStatuses([...st]);
@@ -87,7 +110,7 @@ export default function Import() {
           found[i] = null;
         }
         st[i] = found[i] ? 'found' : 'missing';
-        if (++done % 4 === 0 || done === data.tracks.length) flush();
+        if (++done % (data.tracks.length > 200 ? 15 : 4) === 0 || done === data.tracks.length) flush();
         else setStatuses([...st]);
       },
       ctrl.signal,
@@ -147,6 +170,19 @@ export default function Import() {
           </p>
         )}
 
+        <input ref={fileInput} type="file" accept=".csv,text/csv" hidden onChange={(e) => (onCsv(e.target.files?.[0]), (e.target.value = ''))} />
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <button onClick={() => fileInput.current?.click()} className="flex items-center gap-2 font-bold text-white/85 hover:text-white">
+            <FileUp className="size-4 text-accent-2" /> Importer un fichier CSV
+          </button>
+          {apiOn !== null && (
+            <span className={`flex items-center gap-1.5 text-xs font-semibold ${apiOn ? 'text-emerald-300' : 'text-muted'}`}>
+              <span className={`size-1.5 rounded-full ${apiOn ? 'bg-emerald-400' : 'bg-white/30'}`} />
+              {apiOn ? 'API Spotify active : pas de limite' : 'Mode sans clé : 100 titres max par lien'}
+            </span>
+          )}
+        </div>
+
         {!data && !error && (
           <ol className="mt-8 grid gap-3 text-sm text-white/75 md:grid-cols-3">
             {[
@@ -165,9 +201,9 @@ export default function Import() {
         {data && (
           <div className="mt-8">
             <div className="flex items-center gap-4 rounded-[28px] bg-white/[.05] p-4 ring-1 ring-white/[.07]">
-              {data.cover ? <img src={data.cover} alt="" className="size-24 rounded-2xl object-cover shadow-xl" /> : <div className="size-24 rounded-2xl bg-white/10" />}
+              {data.cover ? <img src={data.cover} alt="" className="size-24 rounded-2xl object-cover shadow-xl" /> : <div className="bg-sunset grid size-24 shrink-0 place-items-center rounded-2xl text-on-accent"><FileUp className="size-9" /></div>}
               <div className="min-w-0">
-                <div className="text-xs font-semibold uppercase tracking-wider text-white/60">{data.kind === 'album' ? 'Album' : 'Playlist'} Spotify</div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-white/60">{data.via === 'csv' ? 'Fichier CSV' : `${data.kind === 'album' ? 'Album' : 'Playlist'} Spotify`}</div>
                 <div className="truncate font-display text-xl font-extrabold">{data.name}</div>
                 <div className="text-sm text-white/70">
                   {data.owner && `${data.owner} · `}
@@ -176,11 +212,33 @@ export default function Import() {
               </div>
             </div>
 
+            {(data.limited || data.apiError) && !playlistId && (
+              <div className="mt-4 flex gap-3 rounded-3xl bg-accent-2/10 p-4 text-sm ring-1 ring-accent-2/25">
+                <Info className="mt-0.5 size-5 shrink-0 text-accent-2" />
+                <div className="text-white/85">
+                  <p className="font-bold text-white">Seuls les 100 premiers titres sont visibles sans clé.</p>
+                  <p className="mt-1">Pour tout récupérer, au choix :</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-4">
+                    <li>
+                      exporte la playlist en CSV sur{' '}
+                      <a href="https://exportify.net" target="_blank" rel="noopener" className="font-bold text-accent-2 underline">Exportify</a>, puis{' '}
+                      <button onClick={() => fileInput.current?.click()} className="font-bold text-accent-2 underline">importe le fichier</button> ;
+                    </li>
+                    <li>ou ajoute tes clés Spotify gratuites dans le fichier .env (voir le README).</li>
+                  </ul>
+                  {data.apiError && <p className="mt-2 text-xs text-white/60">API Spotify : {data.apiError}</p>}
+                </div>
+              </div>
+            )}
+
             {!playlistId && (
               <div className="mt-6">
                 <div className="mb-2 text-sm font-semibold text-white/80">Chercher les titres sur</div>
                 <SourceTabs value={source} onChange={setSource} />
-                <p className="mt-2 text-xs text-muted">{SOURCES[source].hint}. YouTube trouve presque tout ; Audius a un catalogue plus restreint.</p>
+                <p className="mt-2 text-xs text-muted">
+                  {SOURCES[source].hint}. YouTube trouve presque tout ; Audius a un catalogue plus restreint.
+                  {data.tracks.length > 150 && ` Compte environ ${Math.ceil((data.tracks.length * 0.35) / 60)} min pour ${data.tracks.length} titres.`}
+                </p>
                 <button onClick={run} className="bg-sunset mt-5 w-full rounded-full py-3.5 text-base font-bold text-on-accent shadow-[0_10px_30px_-8px_rgba(255,106,61,.7)] transition hover:brightness-110 active:scale-[.98] md:w-auto md:px-10">
                   Importer {plural(data.tracks.length, 'titre')}
                 </button>
@@ -221,8 +279,16 @@ export default function Import() {
             )}
 
             <div className="mt-6 divide-y divide-white/[.04] rounded-[28px] bg-white/[.02] px-3 ring-1 ring-white/[.05]">
+              {data.tracks.length > LIST_MAX && (
+                <p className="py-3 text-center text-xs text-muted">
+                  {playlistId ? 'Seuls les titres en cours ou introuvables sont listés.' : `Aperçu des ${LIST_MAX} premiers titres sur ${data.tracks.length}.`}
+                </p>
+              )}
               {data.tracks.map((t, i) => {
                 const s = statuses[i];
+                if (data.tracks.length > LIST_MAX) {
+                  if (playlistId ? s !== 'missing' && s !== 'searching' : i >= LIST_MAX) return null;
+                }
                 const m = matches[i];
                 return (
                   <div key={i} className="flex items-center gap-3 py-2.5">

@@ -259,8 +259,8 @@ export function NowPlaying() {
   return (
     <div className="animate-sheet fixed inset-0 z-[60] flex flex-col overflow-hidden bg-ink">
       {/* Fond : pochette floutée */}
-      {t.artwork && <img src={t.artwork} alt="" className="absolute inset-0 size-full scale-150 object-cover opacity-50 blur-3xl saturate-150" />}
-      <div className="absolute inset-0 bg-gradient-to-b from-ink/30 via-ink/60 to-ink" />
+      {t.artwork && <img src={t.artwork} alt="" className="absolute inset-0 size-full scale-150 object-cover opacity-80 blur-3xl saturate-[1.8]" />}
+      <div className="absolute inset-0 bg-gradient-to-b from-ink/20 via-ink/45 to-ink/95" />
       <div className="grain pointer-events-none absolute inset-0 opacity-[.07] mix-blend-overlay" />
 
       <div className="relative mx-auto flex w-full max-w-xl flex-1 flex-col px-6 pb-[max(env(safe-area-inset-bottom),20px)] pt-[max(env(safe-area-inset-top),12px)]">

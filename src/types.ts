@@ -30,4 +30,7 @@ export interface SpotifyImport {
   owner: string;
   cover: string;
   tracks: { title: string; artist: string; duration: number }[];
+  via?: 'api' | 'embed' | 'csv';
+  limited?: boolean; // liste tronquée à 100 titres
+  apiError?: string;
 }

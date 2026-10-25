@@ -152,22 +152,22 @@ export default function Home() {
         </div>
 
         <div className="animate-rise mt-3 grid grid-cols-2 gap-3 px-4 [animation-delay:80ms] md:px-7">
-          <button onClick={() => openCreate()} className="group flex items-center gap-3 rounded-[22px] bg-white/[.04] p-3 text-left ring-1 ring-white/[.06] transition hover:bg-white/[.07] active:scale-[.98]">
+          <button onClick={() => openCreate()} className="group flex flex-col items-start gap-3 sm:flex-row sm:items-center rounded-[22px] bg-white/[.04] p-3 text-left ring-1 ring-white/[.06] transition hover:bg-white/[.07] active:scale-[.98]">
             <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-lilac/15 text-lilac">
               <Plus className="size-5" />
             </span>
             <span className="min-w-0">
               <span className="block truncate font-display font-bold">Nouvelle playlist</span>
-              <span className="block truncate text-xs text-muted">Mixe toutes les sources</span>
+              <span className="block truncate text-xs text-muted">YouTube, SoundCloud, Audius</span>
             </span>
           </button>
-          <Link to="/import" className="group flex items-center gap-3 rounded-[22px] bg-white/[.04] p-3 ring-1 ring-white/[.06] transition hover:bg-white/[.07] active:scale-[.98]">
+          <Link to="/import" className="group flex flex-col items-start gap-3 sm:flex-row sm:items-center rounded-[22px] bg-white/[.04] p-3 ring-1 ring-white/[.06] transition hover:bg-white/[.07] active:scale-[.98]">
             <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-[#1db954]/15 text-[#1ed760]">
               <Download className="size-5" />
             </span>
             <span className="min-w-0">
-              <span className="block truncate font-display font-bold">Depuis Spotify</span>
-              <span className="block truncate text-xs text-muted">Importe un lien</span>
+              <span className="block truncate font-display font-bold">Import Spotify</span>
+              <span className="block truncate text-xs text-muted">Colle un lien de playlist</span>
             </span>
           </Link>
         </div>

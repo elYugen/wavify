@@ -202,10 +202,14 @@ export async function searchAudius(q) {
 
 /* ------------------------------ Spotify ----------------------------- */
 
-export async function spotifyPlaylist(input) {
+function parseSpotifyUrl(input) {
   const m = String(input).match(/(playlist|album)[/:]([a-zA-Z0-9]{22})/);
   if (!m) throw new Error('Lien Spotify invalide (playlist ou album attendu)');
-  const [, kind, id] = m;
+  return { kind: m[1], id: m[2] };
+}
+
+/** Page "embed" publique : sans clé, mais limitée aux 100 premiers titres. */
+async function spotifyEmbed(kind, id) {
   const html = await fetch(`https://open.spotify.com/embed/${kind}/${id}`, {
     headers: { 'User-Agent': UA, 'Accept-Language': 'fr-FR,fr;q=0.9' },
   }).then((r) => r.text());
@@ -214,18 +218,113 @@ export async function spotifyPlaylist(input) {
   const entity = JSON.parse(nd[1])?.props?.pageProps?.state?.data?.entity;
   if (!entity) throw new Error('Playlist introuvable ou privée');
   const images = entity.coverArt?.sources || entity.visualIdentity?.image || [];
+  const tracks = (entity.trackList || []).map((t) => ({
+    title: t.title,
+    artist: t.subtitle?.replace(/ /g, ' ') || '',
+    duration: Math.round((t.duration || 0) / 1000),
+  }));
   return {
     kind,
     id,
     name: entity.name || entity.title || 'Playlist Spotify',
     owner: entity.subtitle || '',
     cover: images.sort((a, b) => (b.maxWidth || b.width || 0) - (a.maxWidth || a.width || 0))[0]?.url || '',
-    tracks: (entity.trackList || []).map((t) => ({
-      title: t.title,
-      artist: t.subtitle?.replace(/ /g, ' ') || '',
-      duration: Math.round((t.duration || 0) / 1000),
-    })),
+    tracks,
+    via: 'embed',
+    limited: tracks.length >= 100,
   };
+}
+
+/* API Web officielle (Client Credentials) : pagination complète, nécessite
+   SPOTIFY_CLIENT_ID et SPOTIFY_CLIENT_SECRET (gratuits sur developer.spotify.com). */
+function spotifyToken() {
+  const id = process.env.SPOTIFY_CLIENT_ID;
+  const secret = process.env.SPOTIFY_CLIENT_SECRET;
+  return cached('sp:token', 50 * 60e3, async () => {
+    const r = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`,
+      },
+      body: 'grant_type=client_credentials',
+    });
+    if (!r.ok) throw new Error('Clés Spotify refusées (vérifie SPOTIFY_CLIENT_ID / SECRET)');
+    return (await r.json()).access_token;
+  });
+}
+
+async function spotifyGet(url) {
+  const token = await spotifyToken();
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (r.status === 429) {
+      await new Promise((ok) => setTimeout(ok, (Number(r.headers.get('retry-after')) || 1) * 1000));
+      continue;
+    }
+    if (!r.ok) {
+      const err = new Error(`API Spotify ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
+    return r.json();
+  }
+  throw new Error('API Spotify saturée, réessaie dans un instant');
+}
+
+async function spotifyOfficial(kind, id) {
+  const API = 'https://api.spotify.com/v1';
+  const meta = await spotifyGet(`${API}/${kind}s/${id}?market=FR`);
+  const tracks = [];
+  const push = (t) => {
+    if (!t || t.type === 'episode' || !t.name) return;
+    tracks.push({
+      title: t.name,
+      artist: (t.artists || []).map((a) => a.name).join(', '),
+      duration: Math.round((t.duration_ms || 0) / 1000),
+    });
+  };
+  let next;
+  if (kind === 'album') next = `${API}/albums/${id}/tracks?limit=50&market=FR`;
+  else {
+    // L'API a renommé /tracks en /items : on accepte les deux.
+    next = `${API}/playlists/${id}/tracks?limit=100&market=FR`;
+    try {
+      await spotifyGet(`${next}&limit=1`);
+    } catch (e) {
+      if (e.status === 404 || e.status === 403) next = `${API}/playlists/${id}/items?limit=100&market=FR`;
+      else throw e;
+    }
+  }
+  while (next && tracks.length < 10000) {
+    const page = await spotifyGet(next);
+    for (const it of page.items || []) push(kind === 'album' ? it : it.track || it.item);
+    next = page.next;
+  }
+  return {
+    kind,
+    id,
+    name: meta.name,
+    owner: meta.owner?.display_name || (meta.artists || []).map((a) => a.name).join(', '),
+    cover: meta.images?.[0]?.url || '',
+    tracks,
+    via: 'api',
+    limited: false,
+  };
+}
+
+export async function spotifyPlaylist(input) {
+  const { kind, id } = parseSpotifyUrl(input);
+  if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+    try {
+      return await spotifyOfficial(kind, id);
+    } catch (e) {
+      // Repli : la page embed (100 titres max), avec l'erreur pour le diagnostic.
+      const data = await spotifyEmbed(kind, id);
+      return { ...data, apiError: e.message };
+    }
+  }
+  return spotifyEmbed(kind, id);
 }
 
 /* ------------------------------ Routeur ----------------------------- */
@@ -248,6 +347,9 @@ export async function handleApi(path, params) {
       if (!fn) return { status: 400, json: { error: 'Source inconnue' } };
       const results = await cached(`s:${source}:${q.toLowerCase()}`, 30 * 60e3, () => fn(q));
       return { status: 200, json: { results } };
+    }
+    if (route === '/spotify-status') {
+      return { status: 200, json: { api: !!(process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) } };
     }
     if (route === '/spotify') {
       const url = params.get('url') || '';

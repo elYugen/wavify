@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -20,7 +20,10 @@ function apiPlugin(): Plugin {
   return { name: 'wavify-api', configureServer: mount, configurePreviewServer: mount };
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Rend les variables du fichier .env (SPOTIFY_CLIENT_ID…) visibles par le backend.
+  Object.assign(process.env, loadEnv(mode, process.cwd(), ''));
+  return {
   plugins: [
     react(),
     tailwindcss(),
@@ -61,4 +64,5 @@ export default defineConfig({
       },
     }),
   ],
+};
 });
