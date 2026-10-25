@@ -59,6 +59,10 @@ Avec un compte (page **Compte**, icône en haut de l'accueil), les playlists, co
 - entre deux appareils, la version la plus récente d'une playlist gagne, et une playlist supprimée ne revient pas ;
 - la déconnexion vide l'appareil (tout reste sur le compte).
 
+### Partage de playlists
+
+Bouton **Partager** d'une playlist (compte requis) : crée un lien public `https://music.lleroy.fr/s/…`. Toute personne qui l'ouvre, même sans compte, peut écouter la playlist (toujours la dernière version) et l'ajouter à sa collection. « Arrêter le partage » rend le lien inutilisable ; supprimer la playlist aussi.
+
 Authentification par jeton [Sanctum](https://laravel.com/docs/sanctum). Code : `backend/app/Http/Controllers/` et `frontend/src/lib/sync.ts`.
 
 ### API
@@ -117,6 +121,8 @@ Si [yt-dlp](https://github.com/yt-dlp/yt-dlp) est installé sur le serveur, Wavi
 1. le serveur demande à yt-dlp l'adresse du flux audio de la vidéo (AAC/m4a, lisible sur iPhone) ;
 2. il relaie ce flux à l'app (`/api/stream/youtube/{id}`), par tranches de 2 Mo, en gérant l'avance rapide ;
 3. l'app le joue avec un simple lecteur audio, comme Audius : la lecture continue écran verrouillé et enchaîne les titres.
+
+Ce mode s'active **playlist par playlist** avec le bouton **Écran coupé** (lune) de la page playlist, aussi pour les coups de cœur. Ailleurs, YouTube garde le lecteur intégré, qui démarre tout de suite : la résolution d'un titre par yt-dlp prend quelques secondes. Le bouton n'apparaît que si yt-dlp est disponible sur le serveur.
 
 L'adresse du flux contient l'IP qui l'a demandée : c'est donc forcément le serveur qui relaie le son (yt-dlp et le relais sortent tous les deux en IPv4).
 Si le flux échoue pour une vidéo, l'app reprend le lecteur YouTube intégré. Sans yt-dlp, rien ne change.

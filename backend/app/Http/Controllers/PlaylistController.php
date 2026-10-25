@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Playlist;
 use App\Support\Tracks;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class PlaylistController extends Controller
 {
@@ -19,6 +21,7 @@ class PlaylistController extends Controller
             'createdAt' => ['required', 'integer', 'min:0'],
             'updatedAt' => ['required', 'integer', 'min:0'],
             'playedAt' => ['nullable', 'integer', 'min:0'],
+            'screenOff' => ['nullable', 'boolean'],
         ]);
 
         $playlist = $request->user()->playlists()->firstOrNew(['uid' => $uid]);
@@ -42,6 +45,7 @@ class PlaylistController extends Controller
             'cover' => $data['cover'] ?? null,
             'imported_from' => $data['importedFrom'] ?? null,
             'tracks' => Tracks::clean($data['tracks']),
+            'screen_off' => (bool) ($data['screenOff'] ?? false),
             'created_at' => $playlist->exists && ! $deleted ? $playlist->created_at : $data['createdAt'],
             'updated_at' => $data['updatedAt'],
             'played_at' => $data['playedAt'] ?? null,
@@ -59,8 +63,35 @@ class PlaylistController extends Controller
             'created_at' => 0,
             'updated_at' => 0,
         ]);
-        $playlist->fill(['tracks' => [], 'cover' => null, 'deleted_at' => (int) floor(microtime(true) * 1000)])->save();
+        $playlist->fill(['tracks' => [], 'cover' => null, 'share_token' => null, 'deleted_at' => (int) floor(microtime(true) * 1000)])->save();
 
         return response()->noContent();
+    }
+
+    /** Active le lien de partage (le même jeton est gardé tant qu'il n'est pas révoqué). */
+    public function share(Request $request, string $uid)
+    {
+        $playlist = $request->user()->playlists()->alive()->where('uid', $uid)->firstOrFail();
+        if (! $playlist->share_token) {
+            $playlist->update(['share_token' => Str::random(24)]);
+        }
+
+        return response()->json(['token' => $playlist->share_token]);
+    }
+
+    /** Révoque le lien : il ne fonctionnera plus, même pour ceux qui l'ont reçu. */
+    public function unshare(Request $request, string $uid)
+    {
+        $request->user()->playlists()->where('uid', $uid)->update(['share_token' => null]);
+
+        return response()->noContent();
+    }
+
+    /** Playlist partagée, lisible par tous (toujours la version à jour). */
+    public function shared(string $token)
+    {
+        $playlist = Playlist::with('user')->alive()->where('share_token', $token)->firstOrFail();
+
+        return response()->json($playlist->toShared());
     }
 }

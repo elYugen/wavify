@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['uid', 'name', 'description', 'cover', 'imported_from', 'tracks', 'created_at', 'updated_at', 'played_at', 'deleted_at'])]
+#[Fillable(['uid', 'name', 'description', 'cover', 'imported_from', 'tracks', 'screen_off', 'share_token', 'created_at', 'updated_at', 'played_at', 'deleted_at'])]
 #[Hidden(['id', 'user_id'])]
 class Playlist extends Model
 {
@@ -19,6 +19,7 @@ class Playlist extends Model
     {
         return [
             'tracks' => 'array',
+            'screen_off' => 'boolean',
             'created_at' => 'integer',
             'updated_at' => 'integer',
             'played_at' => 'integer',
@@ -46,9 +47,25 @@ class Playlist extends Model
             'tracks' => $this->tracks ?? [],
             'cover' => $this->cover,
             'importedFrom' => $this->imported_from,
+            'screenOff' => $this->screen_off ?: null,
+            'shareToken' => $this->share_token,
             'createdAt' => $this->created_at,
             'updatedAt' => $this->updated_at,
             'playedAt' => $this->played_at,
         ], fn ($v) => $v !== null);
+    }
+
+    /** Version publique d'une playlist partagée : sans identifiants internes. */
+    public function toShared(): array
+    {
+        return [
+            'token' => $this->share_token,
+            'name' => $this->name,
+            'description' => $this->description ?? '',
+            'cover' => $this->cover,
+            'tracks' => $this->tracks ?? [],
+            'owner' => $this->user->name,
+            'updatedAt' => $this->updated_at,
+        ];
     }
 }

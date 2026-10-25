@@ -7,13 +7,14 @@ import { useAuth } from '../store/auth';
 import { useLibrary } from '../store/library';
 import type { Playlist, Track } from '../types';
 
-type Meta = 'liked' | 'recent' | 'searches';
+type Meta = 'liked' | 'recent' | 'searches' | 'likedScreenOff';
 
 interface RemoteLibrary {
   playlists: Playlist[];
   liked: Track[];
   recent: Track[];
   searches: string[];
+  likedScreenOff: boolean;
 }
 
 interface SyncState {
@@ -88,6 +89,7 @@ function watchLibrary() {
     if (s.liked !== prev.liked) pending.meta.add('liked');
     if (s.recent !== prev.recent) pending.meta.add('recent');
     if (s.searches !== prev.searches) pending.meta.add('searches');
+    if (s.likedScreenOff !== prev.likedScreenOff) pending.meta.add('likedScreenOff');
     savePending();
     schedule();
   });
@@ -137,7 +139,7 @@ async function sendAll() {
 
   if (pending.meta.size) {
     const s = useLibrary.getState();
-    const sent = { liked: s.liked, recent: s.recent, searches: s.searches };
+    const sent = { liked: s.liked, recent: s.recent, searches: s.searches, likedScreenOff: s.likedScreenOff };
     const body: Partial<typeof sent> = {};
     for (const m of pending.meta) (body as any)[m] = sent[m];
     try {
@@ -242,8 +244,11 @@ export async function mergeAfterLogin() {
   const searches = [...new Set([...remote.searches, ...local.searches])].slice(0, 12);
   if (searches.length !== remote.searches.length) pending.meta.add('searches');
 
+  const likedScreenOff = remote.likedScreenOff || local.likedScreenOff;
+  if (likedScreenOff !== remote.likedScreenOff) pending.meta.add('likedScreenOff');
+
   savePending();
-  apply({ playlists, liked, recent, searches });
+  apply({ playlists, liked, recent, searches, likedScreenOff });
   await flush();
 }
 
@@ -255,7 +260,7 @@ export async function signOut(force = false) {
   if (!(await flush()) && !force) return false;
   await useAuth.getState().logout();
   clearPending();
-  apply({ playlists: [], liked: [], recent: [], searches: [] });
+  apply({ playlists: [], liked: [], recent: [], searches: [], likedScreenOff: false });
   return true;
 }
 

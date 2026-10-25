@@ -21,6 +21,19 @@ export interface Playlist {
   playedAt?: number;
   cover?: string;
   importedFrom?: string;
+  screenOff?: boolean; // YouTube via yt-dlp : lecture écran éteint, démarrage plus lent
+  shareToken?: string; // lien public /s/{token} (fixé par le serveur)
+}
+
+/** Playlist ouverte depuis un lien de partage. */
+export interface SharedPlaylist {
+  token: string;
+  name: string;
+  description: string;
+  cover?: string;
+  tracks: Track[];
+  owner: string;
+  updatedAt: number;
 }
 
 export interface SpotifyImport {

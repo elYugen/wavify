@@ -36,19 +36,24 @@ class YouTubeAudio
         return $ok;
     }
 
-    /** URL googlevideo du flux audio, mise en cache jusqu'à peu avant son expiration. */
-    public function streamUrl(string $id): string
+    /**
+     * Flux audio : URL googlevideo et en-têtes HTTP à envoyer avec (certains clients YouTube, TV par exemple,
+     * exigent leur propre User-Agent). Mis en cache jusqu'à peu avant l'expiration de l'URL.
+     *
+     * @return array{url: string, headers: array<string, string>}
+     */
+    public function stream(string $id): array
     {
-        $key = "ytdlp:url:{$id}";
-        if ($url = Cache::get($key)) {
-            return $url;
+        $key = "ytdlp:stream:{$id}";
+        if ($stream = Cache::get($key)) {
+            return $stream;
         }
 
         // Un seul yt-dlp à la fois : il réécrit cookies.txt, et le navigateur envoie souvent plusieurs
         // requêtes pour le même titre (plages, préchargement du suivant). Les autres attendent son résultat.
         return Cache::lock('ytdlp:run', 120)->block(60, function () use ($id, $key) {
-            if ($url = Cache::get($key)) {
-                return $url;
+            if ($stream = Cache::get($key)) {
+                return $stream;
             }
             try {
                 return $this->resolve($id, $key);
@@ -60,7 +65,7 @@ class YouTubeAudio
         });
     }
 
-    private function resolve(string $id, string $key): string
+    private function resolve(string $id, string $key): array
     {
         $result = $this->process(45)->run([
             config('services.ytdlp.bin'),
@@ -68,20 +73,25 @@ class YouTubeAudio
             '--no-playlist',
             '--no-warnings',
             '-f', self::FORMAT,
-            '--get-url',
+            '--print', '%(.{url,http_headers})j',
             ...self::extraArgs(),
             "https://www.youtube.com/watch?v={$id}",
         ]);
-        $url = trim(strtok($result->output(), "\n") ?: '');
+        $info = json_decode(trim(strtok($result->output(), "\n") ?: ''), true);
+        $url = $info['url'] ?? '';
         if (! $result->successful() || ! str_starts_with($url, 'https://')) {
             throw new RuntimeException('yt-dlp : '.(trim($result->errorOutput()) ?: 'aucun flux audio'));
         }
 
+        // Les en-têtes de navigation (Accept: text/html…) n'ont pas de sens pour un flux audio.
+        $headers = array_diff_key($info['http_headers'] ?? [], array_flip(['Accept', 'Sec-Fetch-Mode']));
+        $stream = ['url' => $url, 'headers' => $headers];
+
         parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
         $ttl = min(5 * 3600, max(60, (int) ($q['expire'] ?? 0) - time() - 600));
-        Cache::put($key, $url, $ttl);
+        Cache::put($key, $stream, $ttl);
 
-        return $url;
+        return $stream;
     }
 
     /**
@@ -107,7 +117,7 @@ class YouTubeAudio
 
     public function forget(string $id): void
     {
-        Cache::forget("ytdlp:url:{$id}");
+        Cache::forget("ytdlp:stream:{$id}");
     }
 
     /** YTDLP_ARGS : options en plus (cookies, fournisseur de PO token…), séparées par des espaces. */

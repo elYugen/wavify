@@ -33,7 +33,7 @@ class StreamController extends Controller
         $end = $ranged && $m[2] !== '' ? (int) $m[2] : null;
 
         try {
-            [$url, $first] = $this->firstChunk($id, $start, $end);
+            [$stream, $first] = $this->firstChunk($id, $start, $end);
         } catch (\Throwable $e) {
             report($e);
 
@@ -41,6 +41,9 @@ class StreamController extends Controller
         }
 
         if (! preg_match('#/(\d+)$#', (string) $first->header('Content-Range'), $t)) {
+            parse_str((string) parse_url($stream['url'], PHP_URL_QUERY), $q);
+            logger()->warning("yt-dlp {$id} : flux refusé par YouTube ({$first->status()}, client ".($q['c'] ?? '?').')');
+
             return response()->json(['error' => "Flux YouTube refusé ({$first->status()})"], 502);
         }
         $total = (int) $t[1];
@@ -59,7 +62,7 @@ class StreamController extends Controller
             $headers['Content-Range'] = "bytes {$start}-{$end}/{$total}";
         }
 
-        return response()->stream(function () use ($url, $first, $start, $end) {
+        return response()->stream(function () use ($stream, $first, $start, $end) {
             $pos = $start;
             $chunk = $first;
             while (true) {
@@ -73,7 +76,7 @@ class StreamController extends Controller
                 if ($pos > $end || connection_aborted()) {
                     return;
                 }
-                $chunk = $this->fetch($url, $pos, min($pos + self::CHUNK - 1, $end));
+                $chunk = $this->fetch($stream, $pos, min($pos + self::CHUNK - 1, $end));
                 if ($chunk->status() !== 206) {
                     return;
                 }
@@ -86,22 +89,24 @@ class StreamController extends Controller
     {
         $to = min($start + self::CHUNK - 1, $end ?? PHP_INT_MAX);
         for ($attempt = 0; ; $attempt++) {
-            $url = $this->youtube->streamUrl($id);
-            $res = $this->fetch($url, $start, $to);
+            $stream = $this->youtube->stream($id);
+            $res = $this->fetch($stream, $start, $to);
             if (! in_array($res->status(), [403, 410]) || $attempt > 0) {
-                return [$url, $res];
+                return [$stream, $res];
             }
             $this->youtube->forget($id);
         }
     }
 
-    private function fetch(string $url, int $from, int $to): Response
+    /** @param array{url: string, headers: array<string, string>} $stream */
+    private function fetch(array $stream, int $from, int $to): Response
     {
-        return Http::withHeaders(['User-Agent' => self::UA, 'Range' => "bytes={$from}-{$to}"])
+        // En-têtes fournis par yt-dlp pour ce client YouTube (User-Agent notamment).
+        return Http::withHeaders([...['User-Agent' => self::UA], ...$stream['headers'], 'Range' => "bytes={$from}-{$to}"])
             // Même IP que yt-dlp (--force-ipv4), sinon googlevideo refuse l'URL.
             ->withOptions(['stream' => true, 'force_ip_resolve' => 'v4'])
             ->connectTimeout(10)
             ->timeout(60)
-            ->get($url);
+            ->get($stream['url']);
     }
 }

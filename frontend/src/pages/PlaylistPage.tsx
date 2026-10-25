@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowDown, ArrowUp, Check, Images, ImagePlus, ListChecks, MoreVertical, Pencil, RotateCcw, Search as SearchIcon, Shuffle, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Images, ImagePlus, ListChecks, MoreVertical, Pencil, RotateCcw, Search as SearchIcon, Share2, Shuffle, Trash2, Upload, X } from 'lucide-react';
 import type { Playlist, Source, Track } from '../types';
 import { useLibrary } from '../store/library';
 import { usePlayer } from '../store/player';
@@ -17,6 +17,7 @@ import { RowSkeleton } from '../components/Skeleton';
 import { Vinyl } from '../components/Vinyl';
 import { Artwork } from '../components/Artwork';
 import { coverFromArtwork, squareImage } from '../lib/image';
+import { ScreenOffToggle, ShareSheet } from '../components/PlaylistExtras';
 
 function AddTracks({ playlist }: { playlist: Playlist }) {
   const [q, setQ] = useState('');
@@ -231,6 +232,7 @@ export default function PlaylistPage({ liked = false }: { liked?: boolean }) {
   const [editing, setEditing] = useState(false); // mode édition des titres
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [askDelete, setAskDelete] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const addRef = useRef<HTMLDivElement>(null);
 
   const tracks: Track[] = liked ? likedTracks : playlist?.tracks || [];
@@ -336,6 +338,12 @@ export default function PlaylistPage({ liked = false }: { liked?: boolean }) {
             <Shuffle className="size-5" />
           </button>
           <div className="flex-1" />
+          <ScreenOffToggle contextId={contextId} />
+          {!liked && (
+            <button onClick={() => setSharing(true)} className="grid size-12 place-items-center rounded-full text-white/85 ring-1 ring-white/15 transition hover:ring-white/40" aria-label="Partager">
+              <Share2 className="size-5" />
+            </button>
+          )}
           {tracks.length > 0 && (
             <button onClick={() => setEditing(true)} className="flex h-12 items-center gap-2 rounded-full px-4 text-sm font-bold text-white/85 ring-1 ring-white/15 transition hover:ring-white/40" aria-label="Modifier les titres">
               <ListChecks className="size-5" /> <span className="hidden sm:inline">Titres</span>
@@ -390,6 +398,7 @@ export default function PlaylistPage({ liked = false }: { liked?: boolean }) {
         <>
           <Sheet open={menu} onClose={() => setMenu(false)} title={<div className="flex items-center gap-3"><PlaylistCover playlist={playlist} className="size-12" rounded="rounded-xl" /><span className="truncate font-display text-lg font-bold">{name}</span></div>}>
             <div className="py-1">
+              <SheetItem icon={<Share2 />} label={playlist!.shareToken ? 'Lien de partage' : 'Partager la playlist'} onClick={() => (setMenu(false), setSharing(true))} />
               <SheetItem icon={<Pencil />} label="Nom, description et miniature" onClick={() => (setMenu(false), setEdit(true))} />
               {tracks.length > 0 && <SheetItem icon={<ListChecks />} label="Retirer ou réorganiser des titres" onClick={() => (setMenu(false), setEditing(true))} />}
               <SheetItem icon={<Trash2 />} label="Supprimer la playlist" danger onClick={() => (setMenu(false), setAskDelete(true))} />
@@ -417,6 +426,7 @@ export default function PlaylistPage({ liked = false }: { liked?: boolean }) {
             </div>
           </Sheet>
           {edit && <EditSheet playlist={playlist!} open={edit} onClose={() => setEdit(false)} />}
+          <ShareSheet playlist={playlist!} open={sharing} onClose={() => setSharing(false)} />
         </>
       )}
     </div>

@@ -13,6 +13,8 @@ class YouTubeStreamTest extends TestCase
 
     private const URL = 'https://rr1---sn-test.googlevideo.com/videoplayback?expire=9999999999&ip=1.2.3.4';
 
+    private const INFO = '{"url": "'.self::URL.'", "http_headers": {"User-Agent": "TvClient/1.0", "Accept": "text/html"}}';
+
     private string $file;
 
     protected function setUp(): void
@@ -53,18 +55,20 @@ class YouTubeStreamTest extends TestCase
 
     public function test_streams_whole_file_in_chunks(): void
     {
-        Process::fake(['*' => Process::result(output: self::URL."\n")]);
+        Process::fake(['*' => Process::result(output: self::INFO."\n")]);
         $this->fakeGoogleVideo();
 
         $res = $this->get('/api/stream/youtube/'.self::ID);
         $res->assertOk()->assertHeader('Content-Type', 'audio/mp4')->assertHeader('Content-Length', strlen($this->file));
         $this->assertSame($this->file, $res->streamedContent());
         Http::assertSentCount(3);
+        // User-Agent du client YouTube transmis, en-têtes de navigation retirés.
+        Http::assertSent(fn ($r) => $r->header('User-Agent') === ['TvClient/1.0'] && ! $r->hasHeader('Accept', 'text/html'));
     }
 
     public function test_honours_range_requests(): void
     {
-        Process::fake(['*' => Process::result(output: self::URL)]);
+        Process::fake(['*' => Process::result(output: self::INFO)]);
         $this->fakeGoogleVideo();
 
         $res = $this->withHeader('Range', 'bytes=3000000-')->get('/api/stream/youtube/'.self::ID);
@@ -79,11 +83,11 @@ class YouTubeStreamTest extends TestCase
         Process::fake(['*' => Process::sequence()
             ->push(Process::result(output: '2026.10.21'))
             ->push(Process::result(exitCode: 1, errorOutput: 'ERROR: HTTP Error 503'))
-            ->push(Process::result(output: self::URL))]);
+            ->push(Process::result(output: self::INFO))]);
         $this->fakeGoogleVideo();
 
         $this->withHeader('Range', 'bytes=0-1')->get('/api/stream/youtube/'.self::ID)->assertStatus(206);
-        Process::assertRanTimes(fn ($p) => in_array('--get-url', $p->command), 2);
+        Process::assertRanTimes(fn ($p) => in_array('--print', $p->command), 2);
     }
 
     public function test_ytdlp_failure_returns_502_and_bad_ids_404(): void

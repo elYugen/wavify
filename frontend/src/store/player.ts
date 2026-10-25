@@ -47,19 +47,31 @@ function shuffled<T>(arr: T[]) {
   return a;
 }
 
+/** Le serveur sait lire YouTube en audio (yt-dlp) : l'option « Écran coupé » est alors proposée. */
+export const useStreamSupport = create<{ youtube: boolean }>(() => ({ youtube: false }));
+
+/** Option « Écran coupé » de la playlist (ou des coups de cœur) en cours de lecture. */
+function screenOff(contextId: string | null) {
+  const lib = useLibrary.getState();
+  if (contextId === 'liked') return lib.likedScreenOff;
+  return !!contextId && !!lib.playlists.find((p) => p.id === contextId)?.screenOff;
+}
+
 export const usePlayer = create<PlayerState>()(
   persist(
     (set, get) => {
       const start = (t: Track) => {
         set({ position: 0, duration: t.duration, isPlaying: true });
-        engine.load(t, true);
+        const off = screenOff(get().contextId);
+        engine.load(t, true, off);
         useLibrary.getState().pushRecent(t);
         // Prépare le titre suivant pendant l'écoute (évite l'attente de yt-dlp à l'enchaînement).
-        setTimeout(() => {
-          const { queue, index } = get();
-          const next = queue[index + 1];
-          if (next && queue[index]?.id === t.id) engine.warm(next);
-        }, 5000);
+        if (off)
+          setTimeout(() => {
+            const { queue, index } = get();
+            const next = queue[index + 1];
+            if (next && queue[index]?.id === t.id) engine.warm(next);
+          }, 5000);
       };
 
       return {
@@ -216,7 +228,10 @@ export function initPlayer() {
     },
   });
   engine.setVolume(P().volume);
-  youtubeAudioEnabled().then((on) => engine.setYouTubeAudio(on));
+  youtubeAudioEnabled().then((youtube) => {
+    engine.setYouTubeAudio(youtube);
+    useStreamSupport.setState({ youtube });
+  });
 
   const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;
   if (ms) {

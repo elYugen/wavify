@@ -1,4 +1,4 @@
-import type { Source, SpotifyImport, Track } from '../types';
+import type { SharedPlaylist, Source, SpotifyImport, Track } from '../types';
 
 type RawTrack = Omit<Track, 'id'>;
 
@@ -68,6 +68,13 @@ export function fetchSpotify(url: string, spotifyToken?: string | null) {
 export function audiusStreamUrl(id: string) {
   return `https://api.audius.co/v1/tracks/${encodeURIComponent(id)}/stream?app_name=wavify-pwa`;
 }
+
+export const fetchShared = (token: string) => getJson<SharedPlaylist>(`/api/shared/${encodeURIComponent(token)}`);
+
+/** Crée (ou renvoie) le lien de partage d'une playlist du compte. */
+export const sharePlaylist = (id: string) => request<{ token: string }>('POST', `/api/playlists/${encodeURIComponent(id)}/share`);
+
+export const unsharePlaylist = (id: string) => request('DELETE', `/api/playlists/${encodeURIComponent(id)}/share`);
 
 /** Flux audio YouTube relayé par le serveur (yt-dlp) : se lit écran verrouillé, contrairement à l'iframe. */
 export const youtubeAudioUrl = (id: string) => `/api/stream/youtube/${encodeURIComponent(id)}`;

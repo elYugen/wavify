@@ -18,6 +18,7 @@ class LibraryController extends Controller
             'liked' => $library->liked ?? [],
             'recent' => $library->recent ?? [],
             'searches' => $library->searches ?? [],
+            'likedScreenOff' => (bool) $library->liked_screen_off,
         ]);
     }
 
@@ -29,6 +30,7 @@ class LibraryController extends Controller
             'recent' => ['sometimes', 'array'],
             'searches' => ['sometimes', 'array', 'max:50'],
             'searches.*' => ['string', 'max:200'],
+            'likedScreenOff' => ['sometimes', 'boolean'],
         ]);
 
         $library = $request->user()->library;
@@ -40,6 +42,9 @@ class LibraryController extends Controller
         }
         if ($request->has('searches')) {
             $library->searches = array_values($request->input('searches'));
+        }
+        if ($request->has('likedScreenOff')) {
+            $library->liked_screen_off = $request->boolean('likedScreenOff');
         }
         $request->user()->library()->save($library);
 

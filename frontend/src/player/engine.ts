@@ -1,7 +1,7 @@
 // Moteur de lecture unifié.
 //  - Audius      : <audio> HTML5 (fonctionne écran verrouillé)
-//  - YouTube     : <audio> sur le flux relayé par le serveur (yt-dlp) s'il est disponible,
-//                  sinon IFrame Player API officielle (coupée écran verrouillé)
+//  - YouTube     : IFrame Player API officielle (démarrage immédiat, coupée écran verrouillé),
+//                  ou <audio> sur le flux relayé par le serveur (yt-dlp) pour les playlists « Écran coupé »
 //  - SoundCloud  : Widget API officielle
 import type { Track } from '../types';
 import { audiusStreamUrl, youtubeAudioUrl } from '../lib/api';
@@ -51,7 +51,8 @@ class Engine {
   current: Track | null = null;
   private volume = 1;
 
-  // Lecture YouTube en audio via le serveur ; les vidéos dont le flux a échoué repassent par l'iframe.
+  // Lecture YouTube en audio via le serveur (si yt-dlp y est installé) ; les vidéos dont le flux a échoué
+  // repassent par l'iframe.
   private ytAudio = false;
   private ytAudioFailed = new Set<string>();
 
@@ -248,11 +249,13 @@ class Engine {
     }
   }
 
-  async load(track: Track, autoplay = true) {
+  /** @param screenOff lire YouTube en audio via le serveur (option « Écran coupé » de la playlist). */
+  async load(track: Track, autoplay = true, screenOff = false) {
     this.current = track;
     this.h.onTime(0, track.duration);
     this.h.onLoading(true);
-    const viaAudio = track.source === 'audius' || (track.source === 'youtube' && this.ytAudio && !this.ytAudioFailed.has(track.sourceId));
+    const viaAudio =
+      track.source === 'audius' || (track.source === 'youtube' && screenOff && this.ytAudio && !this.ytAudioFailed.has(track.sourceId));
     if (viaAudio) {
       this.setMode('audio');
       // play() est appelé tout de suite, dans le geste de l'utilisateur : obligatoire sur iPhone.

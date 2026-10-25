@@ -8,11 +8,16 @@ interface LibraryState {
   liked: Track[];
   recent: Track[];
   searches: string[];
+  likedScreenOff: boolean;
   createPlaylist: (
     name: string,
     opts?: { description?: string; tracks?: Track[]; cover?: string; importedFrom?: string },
   ) => string;
-  updatePlaylist: (id: string, patch: Partial<Pick<Playlist, 'name' | 'description' | 'tracks' | 'cover'>>) => void;
+  updatePlaylist: (id: string, patch: Partial<Pick<Playlist, 'name' | 'description' | 'tracks' | 'cover' | 'screenOff'>>) => void;
+  /** Option « Écran coupé » d'une playlist (ou des coups de cœur avec 'liked'). */
+  setScreenOff: (contextId: string, on: boolean) => void;
+  /** Lien de partage reçu du serveur : ne change pas la date de modification. */
+  setShareToken: (id: string, token: string | undefined) => void;
   removeTracks: (id: string, trackIds: string[]) => void;
   unlikeMany: (trackIds: string[]) => void;
   deletePlaylist: (id: string) => void;
@@ -35,6 +40,7 @@ export const useLibrary = create<LibraryState>()(
       liked: [],
       recent: [],
       searches: [],
+      likedScreenOff: false,
 
       createPlaylist: (name, opts = {}) => {
         const id = uid();
@@ -55,6 +61,12 @@ export const useLibrary = create<LibraryState>()(
 
       updatePlaylist: (id, patch) =>
         set((s) => ({ playlists: s.playlists.map((p) => (p.id === id ? touch(p, patch) : p)) })),
+
+      setScreenOff: (contextId, on) =>
+        contextId === 'liked' ? set({ likedScreenOff: on }) : get().updatePlaylist(contextId, { screenOff: on }),
+
+      setShareToken: (id, token) =>
+        set((s) => ({ playlists: s.playlists.map((p) => (p.id === id ? { ...p, shareToken: token } : p)) })),
 
       deletePlaylist: (id) => set((s) => ({ playlists: s.playlists.filter((p) => p.id !== id) })),
 
