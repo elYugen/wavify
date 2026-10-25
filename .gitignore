@@ -4,3 +4,4 @@ dev-dist
 .vite
 .env*
 !.env.example
+cookies.txt

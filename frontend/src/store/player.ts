@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Track } from '../types';
 import { engine } from '../player/engine';
+import { youtubeAudioEnabled } from '../lib/api';
 import { useLibrary } from './library';
 import { toast } from './toast';
 
@@ -53,6 +54,12 @@ export const usePlayer = create<PlayerState>()(
         set({ position: 0, duration: t.duration, isPlaying: true });
         engine.load(t, true);
         useLibrary.getState().pushRecent(t);
+        // Prépare le titre suivant pendant l'écoute (évite l'attente de yt-dlp à l'enchaînement).
+        setTimeout(() => {
+          const { queue, index } = get();
+          const next = queue[index + 1];
+          if (next && queue[index]?.id === t.id) engine.warm(next);
+        }, 5000);
       };
 
       return {
@@ -209,6 +216,7 @@ export function initPlayer() {
     },
   });
   engine.setVolume(P().volume);
+  youtubeAudioEnabled().then((on) => engine.setYouTubeAudio(on));
 
   const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;
   if (ms) {

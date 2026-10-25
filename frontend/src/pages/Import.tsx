@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, CircleAlert, ClipboardPaste, FileUp, Info, LoaderCircle, RotateCw, Search as SearchIcon, WifiOff, X } from 'lucide-react';
+import { Check, CircleAlert, CircleHelp, ClipboardPaste, FileUp, Info, LoaderCircle, RotateCw, Search as SearchIcon, WifiOff, X } from 'lucide-react';
 import type { Source, SpotifyImport, Track } from '../types';
 import { HttpError, fetchSpotify, spotifyApiEnabled } from '../lib/api';
 import { csvToImport } from '../lib/csv';
+import { consumeSpotifyRedirect, disconnectSpotify, spotifyConnected, spotifyLoginUrl, spotifyToken } from '../lib/spotifyAuth';
 import { matchTrack, pool } from '../lib/match';
 import { useLibrary } from '../store/library';
 import { usePlayer } from '../store/player';
@@ -12,6 +13,8 @@ import { plural } from '../lib/format';
 import { SOURCES } from '../lib/sources';
 import { SourceTabs } from '../components/SourceTabs';
 import { Artwork } from '../components/Artwork';
+import { CsvGuide } from '../components/CsvGuide';
+import { FindTrackSheet } from '../components/FindTrackSheet';
 
 type Status = 'pending' | 'searching' | 'found' | 'missing' | 'error';
 
@@ -60,8 +63,17 @@ export default function Import() {
   const job = useRef<{ id: string; found: (Track | null)[]; st: Status[] } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [apiOn, setApiOn] = useState<boolean | null>(null);
+  const [spConnected, setSpConnected] = useState(spotifyConnected);
+  const [guide, setGuide] = useState(false);
+  const [finding, setFinding] = useState<number | null>(null); // titre introuvable cherché à la main
   useEffect(() => {
     spotifyApiEnabled().then(setApiOn);
+    // Retour de la connexion Spotify (/api/spotify/callback)
+    const had = spotifyConnected();
+    const spError = consumeSpotifyRedirect();
+    if (spError) setError(spError);
+    else if (!had && spotifyConnected()) toast('Compte Spotify connecté');
+    setSpConnected(spotifyConnected());
     // Reprise d'un import interrompu (rechargement, app fermée, serveur coupé…)
     const saved = loadJob();
     if (!saved || !useLibrary.getState().playlists.some((p) => p.id === saved.id)) return saveJob(null);
@@ -110,7 +122,9 @@ export default function Import() {
     setData(null);
     setPlaylistId(null);
     try {
-      load(await fetchSpotify(value.trim()));
+      const token = await spotifyToken();
+      setSpConnected(!!token);
+      load(await fetchSpotify(value.trim(), token));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -196,7 +210,35 @@ export default function Import() {
     }
   };
 
+  /** Titre introuvable choisi à la main : ajouté à la playlist importée, à sa place d'origine. */
+  const resolve = (i: number, t: Track) => {
+    if (!playlistId || !job.current || !data) return;
+    const { found, st } = job.current;
+    found[i] = t;
+    st[i] = 'found';
+    setStatuses([...st]);
+    setMatches([...found]);
+    const p = useLibrary.getState().playlists.find((x) => x.id === playlistId);
+    if (p && !p.tracks.some((x) => x.id === t.id)) {
+      let at = 0;
+      for (let j = i - 1; j >= 0; j--) {
+        const k = found[j] ? p.tracks.findIndex((x) => x.id === found[j]!.id) : -1;
+        if (k >= 0) {
+          at = k + 1;
+          break;
+        }
+      }
+      const tracks = [...p.tracks];
+      tracks.splice(at, 0, t);
+      updatePlaylist(playlistId, { tracks });
+    }
+    if (loadJob()?.id === playlistId) saveJob({ data, url, source, id: playlistId, found, st });
+    setFinding(null);
+    toast(`« ${t.title} » ajouté à la playlist`);
+  };
+
   const foundCount = statuses.filter((s) => s === 'found').length;
+  const missingCount = statuses.filter((s) => s === 'missing').length;
   const doneCount = statuses.filter((s) => s === 'found' || s === 'missing').length;
   const progress = data ? (doneCount / data.tracks.length) * 100 : 0;
   const finished = !!playlistId && !running && !paused;
@@ -250,10 +292,27 @@ export default function Import() {
           <button onClick={() => fileInput.current?.click()} className="flex items-center gap-2 font-bold text-white/85 hover:text-white">
             <FileUp className="size-4 text-accent-2" /> Importer un fichier CSV
           </button>
-          {apiOn !== null && (
-            <span className={`flex items-center gap-1.5 text-xs font-semibold ${apiOn ? 'text-emerald-300' : 'text-muted'}`}>
-              <span className={`size-1.5 rounded-full ${apiOn ? 'bg-emerald-400' : 'bg-white/30'}`} />
-              {apiOn ? 'API Spotify active : pas de limite' : 'Mode sans clé : 100 titres max par lien'}
+          <button onClick={() => setGuide(true)} className="flex items-center gap-1.5 font-semibold text-muted hover:text-white">
+            <CircleHelp className="size-4" /> Comment faire ?
+          </button>
+          {apiOn && spConnected && (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
+              <span className="size-1.5 rounded-full bg-emerald-400" />
+              Spotify connecté : tes playlists sans limite
+              <button onClick={() => (disconnectSpotify(), setSpConnected(false))} className="ml-1 text-muted underline hover:text-white">
+                Déconnecter
+              </button>
+            </span>
+          )}
+          {apiOn && !spConnected && (
+            <a href={spotifyLoginUrl} className="flex items-center gap-1.5 rounded-full bg-[#1db954] px-3.5 py-1.5 text-xs font-bold text-black transition hover:brightness-110">
+              Connecter Spotify : tes playlists sans limite
+            </a>
+          )}
+          {apiOn === false && (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-muted">
+              <span className="size-1.5 rounded-full bg-white/30" />
+              Mode sans clé : 100 titres max par lien
             </span>
           )}
         </div>
@@ -291,17 +350,21 @@ export default function Import() {
               <div className="mt-4 flex gap-3 rounded-3xl bg-accent-2/10 p-4 text-sm ring-1 ring-accent-2/25">
                 <Info className="mt-0.5 size-5 shrink-0 text-accent-2" />
                 <div className="text-white/85">
-                  <p className="font-bold text-white">Seuls les 100 premiers titres sont visibles sans clé.</p>
-                  <p className="mt-1">Pour tout récupérer, au choix :</p>
+                  <p className="font-bold text-white">Seuls les 100 premiers titres ont pu être lus.</p>
+                  {data.apiError && <p className="mt-1">{data.apiError}</p>}
+                  <p className="mt-1">Pour tout récupérer :</p>
                   <ul className="mt-1 list-disc space-y-1 pl-4">
+                    {apiOn && !spConnected && (
+                      <li>
+                        si c'est <b>ta</b> playlist,{' '}
+                        <a href={spotifyLoginUrl} className="font-bold text-accent-2 underline">connecte ton compte Spotify</a> puis analyse à nouveau ;
+                      </li>
+                    )}
                     <li>
-                      exporte la playlist en CSV sur{' '}
-                      <a href="https://exportify.net" target="_blank" rel="noopener" className="font-bold text-accent-2 underline">Exportify</a>, puis{' '}
-                      <button onClick={() => fileInput.current?.click()} className="font-bold text-accent-2 underline">importe le fichier</button> ;
+                      sinon, exporte-la en CSV avec Exportify :{' '}
+                      <button onClick={() => setGuide(true)} className="font-bold text-accent-2 underline">voir le tuto</button>.
                     </li>
-                    <li>ou ajoute tes clés Spotify gratuites dans le fichier .env (voir le README).</li>
                   </ul>
-                  {data.apiError && <p className="mt-2 text-xs text-white/60">API Spotify : {data.apiError}</p>}
                 </div>
               </div>
             )}
@@ -325,6 +388,7 @@ export default function Import() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-semibold">
                     {running ? 'Recherche des titres…' : paused ? 'Import en pause' : 'Import terminé'} · {foundCount}/{data.tracks.length} trouvés
+                    {!running && missingCount > 0 && <span className="text-accent-2"> · {missingCount} à ajouter à la main</span>}
                   </span>
                   {running && (
                     <button onClick={() => abort.current?.abort()} className="flex items-center gap-1 text-muted hover:text-white">
@@ -392,9 +456,9 @@ export default function Import() {
                     {s === 'found' && <Check className="size-5 text-accent-2" />}
                     {s === 'error' && <span title="Erreur réseau, sera réessayé"><RotateCw className="size-4 text-red-300" /></span>}
                     {s === 'missing' && (
-                      <Link to={`/search?q=${encodeURIComponent(`${t.artist.split(',')[0]} ${t.title}`)}`} className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold hover:bg-white/20">
+                      <button onClick={() => setFinding(i)} disabled={running} className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold hover:bg-white/20 disabled:opacity-40">
                         <SearchIcon className="size-3.5" /> Chercher
-                      </Link>
+                      </button>
                     )}
                   </div>
                 );
@@ -403,6 +467,8 @@ export default function Import() {
           </div>
         )}
       </div>
+      <CsvGuide open={guide} onClose={() => setGuide(false)} onPickFile={() => fileInput.current?.click()} />
+      <FindTrackSheet target={finding !== null && data ? data.tracks[finding] : null} onPick={(t) => finding !== null && resolve(finding, t)} onClose={() => setFinding(null)} />
     </div>
   );
 }

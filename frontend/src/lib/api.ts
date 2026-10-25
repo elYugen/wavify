@@ -18,13 +18,13 @@ export const setAuthToken = (t: string | null) => {
 };
 
 /** Requête JSON vers le backend Laravel. Le corps d'erreur Laravel ({message, errors}) donne le message. */
-export async function request<T>(method: string, url: string, data?: unknown, signal?: AbortSignal): Promise<T> {
+export async function request<T>(method: string, url: string, data?: unknown, signal?: AbortSignal, extra?: Record<string, string>): Promise<T> {
   // Délai max : une requête bloquée (serveur coupé en pleine réponse) finit par échouer.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 30000);
   const forward = () => ctrl.abort();
   signal?.addEventListener('abort', forward);
-  const headers: Record<string, string> = { Accept: 'application/json' };
+  const headers: Record<string, string> = { Accept: 'application/json', ...extra };
   if (data !== undefined) headers['Content-Type'] = 'application/json';
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
   let res: Response;
@@ -60,12 +60,24 @@ export async function searchTracks(source: Source, q: string, signal?: AbortSign
   return results.map(withId);
 }
 
-export function fetchSpotify(url: string) {
-  return getJson<SpotifyImport>(`/api/spotify?url=${encodeURIComponent(url)}`);
+/** @param spotifyToken jeton du compte Spotify connecté : donne accès à toutes ses playlists, sans limite. */
+export function fetchSpotify(url: string, spotifyToken?: string | null) {
+  return request<SpotifyImport>('GET', `/api/spotify?url=${encodeURIComponent(url)}`, undefined, undefined, spotifyToken ? { 'X-Spotify-Token': spotifyToken } : undefined);
 }
 
 export function audiusStreamUrl(id: string) {
   return `https://api.audius.co/v1/tracks/${encodeURIComponent(id)}/stream?app_name=wavify-pwa`;
+}
+
+/** Flux audio YouTube relayé par le serveur (yt-dlp) : se lit écran verrouillé, contrairement à l'iframe. */
+export const youtubeAudioUrl = (id: string) => `/api/stream/youtube/${encodeURIComponent(id)}`;
+
+export async function youtubeAudioEnabled() {
+  try {
+    return (await getJson<{ youtube: boolean }>('/api/stream/status')).youtube;
+  } catch {
+    return false;
+  }
 }
 
 export async function spotifyApiEnabled() {

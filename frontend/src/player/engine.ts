@@ -1,9 +1,10 @@
 // Moteur de lecture unifié.
 //  - Audius      : <audio> HTML5 (fonctionne écran verrouillé)
-//  - YouTube     : IFrame Player API officielle
+//  - YouTube     : <audio> sur le flux relayé par le serveur (yt-dlp) s'il est disponible,
+//                  sinon IFrame Player API officielle (coupée écran verrouillé)
 //  - SoundCloud  : Widget API officielle
-import type { Source, Track } from '../types';
-import { audiusStreamUrl } from '../lib/api';
+import type { Track } from '../types';
+import { audiusStreamUrl, youtubeAudioUrl } from '../lib/api';
 
 export interface EngineHandlers {
   onTime: (position: number, duration: number) => void;
@@ -41,12 +42,18 @@ const YT_ERRORS: Record<number, string> = {
   150: "L'auteur interdit la lecture hors YouTube",
 };
 
+type Mode = 'audio' | 'youtube' | 'soundcloud';
+
 class Engine {
   private h!: EngineHandlers;
   private audio!: HTMLAudioElement;
-  private kind: Source | null = null;
+  private mode: Mode | null = null; // lecteur actif
   current: Track | null = null;
   private volume = 1;
+
+  // Lecture YouTube en audio via le serveur ; les vidéos dont le flux a échoué repassent par l'iframe.
+  private ytAudio = false;
+  private ytAudioFailed = new Set<string>();
 
   private ytHost!: HTMLDivElement;
   private ytReady: Promise<any> | null = null;
@@ -63,14 +70,22 @@ class Engine {
     this.h = handlers;
     const a = (this.audio = new Audio());
     a.preload = 'auto';
-    const mine = () => this.kind === 'audius';
+    const mine = () => this.mode === 'audio';
     a.addEventListener('timeupdate', () => mine() && this.h.onTime(a.currentTime, a.duration || this.current?.duration || 0));
     a.addEventListener('play', () => mine() && this.h.onPlay());
     a.addEventListener('pause', () => mine() && this.h.onPause());
     a.addEventListener('ended', () => mine() && this.h.onEnded());
     a.addEventListener('waiting', () => mine() && this.h.onLoading(true));
     a.addEventListener('playing', () => mine() && this.h.onLoading(false));
-    a.addEventListener('error', () => mine() && a.src && this.h.onError('Flux Audius indisponible'));
+    a.addEventListener('error', () => {
+      const t = this.current;
+      if (!mine() || !a.src || !t) return;
+      if (t.source === 'youtube') {
+        // Flux serveur indisponible (yt-dlp bloqué…) : on retombe sur le lecteur YouTube intégré.
+        this.ytAudioFailed.add(t.sourceId);
+        this.loadYouTubeIframe(t, true);
+      } else this.h.onError('Flux Audius indisponible');
+    });
 
     // Conteneur du lecteur YouTube : caché par défaut, superposé à la pochette en plein écran.
     const host = (this.ytHost = document.createElement('div'));
@@ -99,7 +114,7 @@ class Engine {
               onReady: () => resolve(player),
               onStateChange: (e: { data: number }) => this.onYtState(e.data),
               onError: (e: { data: number }) =>
-                this.kind === 'youtube' && this.h.onError(YT_ERRORS[e.data] || 'Lecture YouTube impossible'),
+                this.mode === 'youtube' && this.h.onError(YT_ERRORS[e.data] || 'Lecture YouTube impossible'),
             },
           });
         };
@@ -114,7 +129,7 @@ class Engine {
   }
 
   private onYtState(state: number) {
-    if (this.kind !== 'youtube') return;
+    if (this.mode !== 'youtube') return;
     const YT = window.YT.PlayerState;
     clearInterval(this.ytTimer);
     if (state === YT.PLAYING) {
@@ -142,7 +157,7 @@ class Engine {
     const sync = () => {
       if (!this.anchor) return;
       const r = this.anchor.getBoundingClientRect();
-      const visible = this.kind === 'youtube';
+      const visible = this.mode === 'youtube';
       Object.assign(s, {
         left: `${r.left}px`, top: `${r.top}px`, bottom: '', width: `${r.width}px`, height: `${r.height}px`,
         opacity: visible ? '1' : '0', pointerEvents: visible ? 'auto' : 'none', zIndex: visible ? '70' : '-1',
@@ -167,7 +182,7 @@ class Engine {
         const w = window.SC.Widget(f);
         const E = window.SC.Widget.Events;
         await new Promise<void>((r) => w.bind(E.READY, () => r()));
-        const mine = () => this.kind === 'soundcloud';
+        const mine = () => this.mode === 'soundcloud';
         w.bind(E.PLAY, () => {
           if (!mine()) return;
           this.h.onLoading(false);
@@ -190,49 +205,88 @@ class Engine {
 
   /* ----------------------------- API ----------------------------- */
 
-  private stopOthers(next: Source) {
-    if (next !== 'audius' && !this.audio.paused) this.audio.pause();
+  /** Active la lecture YouTube en audio (le serveur a yt-dlp). */
+  setYouTubeAudio(on: boolean) {
+    this.ytAudio = on;
+  }
+
+  /** Fait résoudre le flux d'un titre YouTube par le serveur à l'avance (2 octets demandés). */
+  warm(track: Track) {
+    if (track.source !== 'youtube' || !this.ytAudio || this.ytAudioFailed.has(track.sourceId)) return;
+    fetch(youtubeAudioUrl(track.sourceId), { headers: { Range: 'bytes=0-1' } }).catch(() => {});
+  }
+
+  private stopOthers(next: Mode) {
+    if (next !== 'audio' && !this.audio.paused) this.audio.pause();
     if (next !== 'youtube' && this.ytReady) this.ytReady.then((p) => p.pauseVideo?.()).catch(() => {});
     if (next !== 'soundcloud' && this.scReady) this.scReady.then((w) => w.pause()).catch(() => {});
     clearInterval(this.ytTimer);
   }
 
+  private setMode(mode: Mode) {
+    this.stopOthers(mode);
+    this.mode = mode;
+    // Le lecteur vidéo superposé (plein écran) n'apparaît qu'en mode iframe.
+    if (this.anchor) this.setVideoAnchor(this.anchor);
+  }
+
+  private async loadYouTubeIframe(track: Track, autoplay: boolean) {
+    this.setMode('youtube');
+    this.audio.removeAttribute('src');
+    try {
+      const p = await this.ensureYT();
+      if (this.current !== track) return;
+      p.setVolume(this.volume * 100);
+      if (autoplay) p.loadVideoById(track.sourceId);
+      else {
+        p.cueVideoById(track.sourceId);
+        this.h.onLoading(false);
+      }
+    } catch (e: any) {
+      this.h.onLoading(false);
+      this.h.onError(e?.message || 'Lecture YouTube impossible');
+    }
+  }
+
   async load(track: Track, autoplay = true) {
-    this.stopOthers(track.source);
-    this.kind = track.source;
     this.current = track;
     this.h.onTime(0, track.duration);
     this.h.onLoading(true);
-    try {
-      if (track.source === 'audius') {
-        this.audio.src = audiusStreamUrl(track.sourceId);
-        this.audio.volume = this.volume;
-        if (autoplay) await this.audio.play();
-        else this.h.onLoading(false);
-      } else if (track.source === 'youtube') {
-        const p = await this.ensureYT();
-        if (this.current !== track) return;
-        p.setVolume(this.volume * 100);
-        if (autoplay) p.loadVideoById(track.sourceId);
-        else {
-          p.cueVideoById(track.sourceId);
+    const viaAudio = track.source === 'audius' || (track.source === 'youtube' && this.ytAudio && !this.ytAudioFailed.has(track.sourceId));
+    if (viaAudio) {
+      this.setMode('audio');
+      // play() est appelé tout de suite, dans le geste de l'utilisateur : obligatoire sur iPhone.
+      this.audio.src = track.source === 'audius' ? audiusStreamUrl(track.sourceId) : youtubeAudioUrl(track.sourceId);
+      this.audio.volume = this.volume;
+      if (!autoplay) return this.h.onLoading(false);
+      try {
+        await this.audio.play();
+      } catch (e: any) {
+        // Échec du flux : géré par l'événement « error » (repli iframe pour YouTube).
+        if (e?.name === 'NotAllowedError' && this.current === track) {
           this.h.onLoading(false);
+          this.h.onPause();
         }
-      } else {
-        const url = `https://api.soundcloud.com/tracks/${track.sourceId}`;
-        this.scDuration = track.duration;
-        const { widget, fresh } = this.ensureSC(url);
-        const w = await widget;
-        if (this.current !== track) return;
-        w.setVolume(this.volume * 100);
-        if (!fresh) {
-          await new Promise<void>((r) =>
-            w.load(url, { auto_play: autoplay, visual: false, show_artwork: false, callback: () => r() }),
-          );
-          if (this.current === track) w.setVolume(this.volume * 100);
-        }
-        if (!autoplay) this.h.onLoading(false);
       }
+      return;
+    }
+    if (track.source === 'youtube') return this.loadYouTubeIframe(track, autoplay);
+
+    this.setMode('soundcloud');
+    try {
+      const url = `https://api.soundcloud.com/tracks/${track.sourceId}`;
+      this.scDuration = track.duration;
+      const { widget, fresh } = this.ensureSC(url);
+      const w = await widget;
+      if (this.current !== track) return;
+      w.setVolume(this.volume * 100);
+      if (!fresh) {
+        await new Promise<void>((r) => w.load(url, { auto_play: autoplay, visual: false, show_artwork: false, callback: () => r() }));
+        if (this.current === track) w.setVolume(this.volume * 100);
+      }
+      // Sur mobile, auto_play dans l'URL du widget est bloqué : on relance explicitement.
+      if (autoplay) w.play();
+      else this.h.onLoading(false);
     } catch (e: any) {
       this.h.onLoading(false);
       if (e?.name === 'NotAllowedError') this.h.onPause();
@@ -241,21 +295,21 @@ class Engine {
   }
 
   play() {
-    if (this.kind === 'audius') this.audio.play().catch(() => this.h.onPause());
-    else if (this.kind === 'youtube') this.ytReady?.then((p) => p.playVideo());
-    else if (this.kind === 'soundcloud') this.scReady?.then((w) => w.play());
+    if (this.mode === 'audio') this.audio.play().catch(() => this.h.onPause());
+    else if (this.mode === 'youtube') this.ytReady?.then((p) => p.playVideo());
+    else if (this.mode === 'soundcloud') this.scReady?.then((w) => w.play());
   }
 
   pause() {
-    if (this.kind === 'audius') this.audio.pause();
-    else if (this.kind === 'youtube') this.ytReady?.then((p) => p.pauseVideo());
-    else if (this.kind === 'soundcloud') this.scReady?.then((w) => w.pause());
+    if (this.mode === 'audio') this.audio.pause();
+    else if (this.mode === 'youtube') this.ytReady?.then((p) => p.pauseVideo());
+    else if (this.mode === 'soundcloud') this.scReady?.then((w) => w.pause());
   }
 
   seek(sec: number) {
-    if (this.kind === 'audius') this.audio.currentTime = sec;
-    else if (this.kind === 'youtube') this.ytReady?.then((p) => p.seekTo(sec, true));
-    else if (this.kind === 'soundcloud') this.scReady?.then((w) => w.seekTo(sec * 1000));
+    if (this.mode === 'audio') this.audio.currentTime = sec;
+    else if (this.mode === 'youtube') this.ytReady?.then((p) => p.seekTo(sec, true));
+    else if (this.mode === 'soundcloud') this.scReady?.then((w) => w.seekTo(sec * 1000));
   }
 
   setVolume(v: number) {

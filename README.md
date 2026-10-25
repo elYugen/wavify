@@ -106,30 +106,78 @@ HTTPS avec `certbot --nginx -d music.lleroy.fr`. Côté PHP, `post_max_size` à 
 Variables facultatives du `.env` Laravel :
 - `YOUTUBE_API_KEY` : utilise l'API officielle YouTube Data v3 (10 000 unités/jour, 100 par recherche).
 - `SOUNDCLOUD_CLIENT_ID` : force un client_id SoundCloud.
-- `SPOTIFY_CLIENT_ID` et `SPOTIFY_CLIENT_SECRET` : import Spotify complet, sans limite de titres.
+- `SPOTIFY_CLIENT_ID` et `SPOTIFY_CLIENT_SECRET` : clés Spotify (voir plus bas).
+- `YTDLP_BIN`, `YTDLP_ARGS`, `YTDLP_ENABLED` : lecture YouTube écran éteint (voir ci-dessous).
+
+## Lecture YouTube écran éteint (yt-dlp)
+
+Le lecteur YouTube intégré est mis en pause par YouTube et par iOS dès que l'écran s'éteint.
+Si [yt-dlp](https://github.com/yt-dlp/yt-dlp) est installé sur le serveur, Wavify lit YouTube autrement :
+
+1. le serveur demande à yt-dlp l'adresse du flux audio de la vidéo (AAC/m4a, lisible sur iPhone) ;
+2. il relaie ce flux à l'app (`/api/stream/youtube/{id}`), par tranches de 2 Mo, en gérant l'avance rapide ;
+3. l'app le joue avec un simple lecteur audio, comme Audius : la lecture continue écran verrouillé et enchaîne les titres.
+
+L'adresse du flux contient l'IP qui l'a demandée : c'est donc forcément le serveur qui relaie le son (yt-dlp et le relais sortent tous les deux en IPv4).
+Si le flux échoue pour une vidéo, l'app reprend le lecteur YouTube intégré. Sans yt-dlp, rien ne change.
+
+**Installation (Debian/Ubuntu)** :
+
+```bash
+# yt-dlp, version autonome (sans Python)
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp
+sudo chmod a+rx /usr/local/bin/yt-dlp
+
+# Deno : moteur JavaScript dont yt-dlp a besoin pour YouTube depuis fin 2025
+sudo apt install -y unzip
+curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip -o /tmp/deno.zip
+sudo unzip -o /tmp/deno.zip -d /usr/local/bin && sudo chmod a+rx /usr/local/bin/deno
+
+# Test avec l'utilisateur de PHP-FPM : doit afficher une URL googlevideo.com, sans « WARNING »
+sudo -u www-data /usr/local/bin/yt-dlp --force-ipv4 -f 140 -g "https://www.youtube.com/watch?v=FGBhQbmPwH8"
+```
+
+Dans `backend/.env` : `YTDLP_BIN=/usr/local/bin/yt-dlp` (chemin complet : PHP-FPM vide le `PATH`), puis `php artisan optimize`.
+`https://music.lleroy.fr/api/stream/status` doit répondre `{"youtube":true}`.
+
+**Mises à jour** : YouTube change souvent, yt-dlp aussi. Mets à jour chaque jour (crontab de root) :
+
+```
+0 4 * * * /usr/local/bin/yt-dlp -U >/dev/null 2>&1
+```
+
+**Si YouTube bloque le serveur** (« Sign in to confirm you're not a bot », fréquent sur les IP d'hébergeurs) :
+- exporte les cookies d'un compte YouTube (de préférence secondaire) au format Netscape, place-les sur le serveur lisibles par `www-data`, et mets `YTDLP_ARGS=--cookies /chemin/cookies.txt` ;
+- ou installe un fournisseur de « PO token » (voir le [guide yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide)).
+
+Les erreurs de yt-dlp sont dans `backend/storage/logs/laravel.log`.
+
+Côté ressources : chaque titre lancé coûte une requête yt-dlp (environ 2 à 3 s, puis mise en cache jusqu'à expiration de l'adresse) et la bande passante du fichier audio (environ 4 Mo pour 4 minutes). Le titre suivant de la file est préparé à l'avance.
+
+> Ce mode contourne le lecteur officiel : il est contraire aux conditions d'utilisation de YouTube. À réserver à un usage personnel. `YTDLP_ENABLED=false` le coupe.
 
 ## Importer une playlist de plus de 100 titres
 
 Sans clé, Spotify ne montre que les 100 premiers titres d'une playlist. Deux solutions :
 
-**1. Clés Spotify (recommandé, une seule fois)**
-1. Va sur https://developer.spotify.com/dashboard et clique sur « Create app ».
-2. Mets n'importe quel nom, coche « Web API », et indique `http://127.0.0.1:5173` comme Redirect URI.
-3. Colle le Client ID et le Client Secret dans `backend/.env`.
-4. Relance `php artisan serve`. La page d'import affiche « API Spotify active ».
+**1. « Connecter Spotify » (pour tes propres playlists)**
+Depuis février 2026, l'API Spotify ne donne les titres d'une playlist qu'à son créateur ou ses collaborateurs, et le compte qui crée l'app doit être Premium.
+1. Sur https://developer.spotify.com/dashboard, crée une app avec « Web API ».
+2. Dans **Redirect URIs**, ajoute `https://music.lleroy.fr/api/spotify/callback` (en local : `http://127.0.0.1:5173/api/spotify/callback`, à mettre aussi dans `SPOTIFY_REDIRECT_URI`).
+3. Dans **User Management**, ajoute le compte Spotify de chaque personne qui importera (5 maximum).
+4. Colle le Client ID et le Client Secret dans `backend/.env`, puis `php artisan optimize`.
+5. Sur la page d'import, touche **Connecter Spotify** : tes playlists s'importent alors en entier.
 
-Les playlists éditoriales de Spotify (« Today's Top Hits »…) peuvent rester bloquées par l'API : l'app retombe alors sur les 100 premiers titres.
-
-**2. Fichier CSV (sans clé)**
-Exporte la playlist sur https://exportify.net puis utilise « Importer un fichier CSV » sur la page d'import.
+**2. Fichier CSV (pour toutes les playlists, sans clé)**
+Exporte la playlist sur https://exportify.net puis utilise « Importer un fichier CSV » sur la page d'import. Le lien « Comment faire ? » de la page d'import détaille chaque étape.
 
 Compte environ 2 à 3 minutes pour 1 000 titres : chaque titre est cherché sur la source choisie.
 
 ## Limites à connaître
 
-- **Lecture en arrière-plan** : seul Audius (audio HTML5) continue de façon fiable écran verrouillé. YouTube et SoundCloud passent par leurs lecteurs intégrés officiels, que iOS met en pause quand l'app passe en arrière-plan. Android/Chrome est plus permissif.
+- **Lecture en arrière-plan** : Audius, et YouTube si yt-dlp est installé sur le serveur (voir plus haut), continuent écran verrouillé. SoundCloud et YouTube sans yt-dlp passent par les lecteurs intégrés officiels, mis en pause quand l'app passe en arrière-plan.
 - **iOS et le premier lancement YouTube** : si un titre YouTube ne démarre pas, ouvre le lecteur plein écran et touche la vidéo une fois.
 - Certaines vidéos YouTube interdisent la lecture intégrée : l'app passe alors au titre suivant.
-- **Import Spotify** : playlists et albums publics uniquement. Sans clé, 100 titres maximum (voir plus haut). La correspondance est automatique, les titres non trouvés ont un bouton « Chercher ».
+- **Import Spotify** : playlists et albums publics uniquement. Sans clé, 100 titres maximum (voir plus haut). La correspondance est automatique, les titres non trouvés ont un bouton « Chercher » qui ouvre une recherche et les ajoute à la playlist importée.
 - Les endpoints non officiels (InnerTube, api-v2 SoundCloud, embed Spotify) peuvent changer sans préavis. Tout est centralisé dans `backend/app/Services/MusicSources.php`.
 - Usage personnel : respecte les conditions d'utilisation de chaque plateforme.

@@ -39,10 +39,19 @@ return [
     'spotify' => [
         'client_id' => env('SPOTIFY_CLIENT_ID'),
         'client_secret' => env('SPOTIFY_CLIENT_SECRET'),
+        // Par défaut APP_URL/api/spotify/callback.
+        'redirect' => env('SPOTIFY_REDIRECT_URI'),
     ],
 
     'youtube' => [
         'key' => env('YOUTUBE_API_KEY'),
+    ],
+
+    // Lecture YouTube en audio (écran éteint) via yt-dlp, désactivée d'elle-même s'il est absent.
+    'ytdlp' => [
+        'enabled' => env('YTDLP_ENABLED', true),
+        'bin' => env('YTDLP_BIN', 'yt-dlp'),
+        'args' => env('YTDLP_ARGS', ''),
     ],
 
     'soundcloud' => [

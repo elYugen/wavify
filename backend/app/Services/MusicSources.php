@@ -325,9 +325,9 @@ class MusicSources
         });
     }
 
-    private function spotifyGet(string $url): array
+    private function spotifyGet(string $url, ?string $userToken = null): array
     {
-        $token = $this->spotifyToken();
+        $token = $userToken ?? $this->spotifyToken();
         for ($attempt = 0; $attempt < 4; $attempt++) {
             $r = Http::withToken($token)->timeout(15)->get($url);
             if ($r->status() === 429) {
@@ -344,10 +344,10 @@ class MusicSources
         throw new RuntimeException('API Spotify saturée, réessaie dans un instant');
     }
 
-    private function spotifyOfficial(string $kind, string $id): array
+    private function spotifyOfficial(string $kind, string $id, ?string $userToken = null): array
     {
         $api = 'https://api.spotify.com/v1';
-        $meta = $this->spotifyGet("{$api}/{$kind}s/{$id}?market=FR");
+        $meta = $this->spotifyGet("{$api}/{$kind}s/{$id}?market=FR", $userToken);
         $tracks = [];
         $push = function ($t) use (&$tracks) {
             if (! $t || ($t['type'] ?? null) === 'episode' || empty($t['name'])) {
@@ -366,7 +366,7 @@ class MusicSources
             // L'API a renommé /tracks en /items : on accepte les deux.
             $next = "{$api}/playlists/{$id}/tracks?limit=100&market=FR";
             try {
-                $this->spotifyGet("{$next}&limit=1");
+                $this->spotifyGet("{$next}&limit=1", $userToken);
             } catch (RuntimeException $e) {
                 if (! in_array($e->getCode(), [403, 404])) {
                     throw $e;
@@ -375,7 +375,7 @@ class MusicSources
             }
         }
         while ($next && count($tracks) < 10000) {
-            $page = $this->spotifyGet($next);
+            $page = $this->spotifyGet($next, $userToken);
             foreach ($page['items'] ?? [] as $it) {
                 $push($kind === 'album' ? $it : ($it['track'] ?? $it['item'] ?? null));
             }
@@ -394,15 +394,24 @@ class MusicSources
         ];
     }
 
-    public function spotifyPlaylist(string $input): array
+    /**
+     * @param  string|null  $userToken  jeton OAuth de l'utilisateur (« Connecter Spotify ») : depuis février 2026,
+     *                                  Spotify ne donne les titres d'une playlist qu'à son créateur ou ses collaborateurs.
+     */
+    public function spotifyPlaylist(string $input, ?string $userToken = null): array
     {
         [$kind, $id] = self::parseSpotifyUrl($input);
-        if (self::spotifyEnabled()) {
+        if ($userToken || self::spotifyEnabled()) {
             try {
-                return $this->spotifyOfficial($kind, $id);
+                return $this->spotifyOfficial($kind, $id, $userToken);
             } catch (\Throwable $e) {
+                $message = $kind === 'playlist' && $e->getCode() === 403
+                    ? ($userToken
+                        ? "Spotify ne donne accès qu'aux playlists que tu as créées ou dont tu es collaborateur."
+                        : "Spotify ne donne accès qu'aux playlists de l'utilisateur connecté : connecte ton compte Spotify.")
+                    : $e->getMessage();
                 // Repli : la page embed (100 titres max), avec l'erreur pour le diagnostic.
-                return [...$this->spotifyEmbed($kind, $id), 'apiError' => $e->getMessage()];
+                return [...$this->spotifyEmbed($kind, $id), 'apiError' => $message];
             }
         }
 

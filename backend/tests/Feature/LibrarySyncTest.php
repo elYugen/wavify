@@ -101,6 +101,7 @@ class LibrarySyncTest extends TestCase
     public function test_search_validates_source(): void
     {
         $this->getJson('/api/search?q=test&source=deezer')->assertUnprocessable();
+        config(['services.spotify.client_id' => null]);
         $this->getJson('/api/spotify-status')->assertOk()->assertJson(['api' => false]);
     }
 }

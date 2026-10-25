@@ -33,11 +33,13 @@ class MusicController extends Controller
     public function spotify(Request $request)
     {
         $url = (string) $request->query('url', '');
+        // Jeton de l'utilisateur connecté à Spotify (voir SpotifyAuthController), facultatif.
+        $token = $request->header('X-Spotify-Token') ?: null;
 
         return $this->upstream(fn () => Cache::remember(
-            'sp:'.md5($url),
+            'sp:'.md5($url.'|'.$token),
             now()->addMinutes(10),
-            fn () => $this->sources->spotifyPlaylist($url),
+            fn () => $this->sources->spotifyPlaylist($url, $token),
         ));
     }
 
