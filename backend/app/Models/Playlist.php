@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['uid', 'name', 'description', 'cover', 'imported_from', 'tracks', 'screen_off', 'share_token', 'created_at', 'updated_at', 'played_at', 'deleted_at'])]
+#[Fillable(['uid', 'name', 'description', 'cover', 'imported_from', 'tracks', 'screen_off', 'share_token', 'is_public', 'created_at', 'updated_at', 'played_at', 'deleted_at'])]
 #[Hidden(['id', 'user_id'])]
 class Playlist extends Model
 {
@@ -20,6 +20,7 @@ class Playlist extends Model
         return [
             'tracks' => 'array',
             'screen_off' => 'boolean',
+            'is_public' => 'boolean',
             'created_at' => 'integer',
             'updated_at' => 'integer',
             'played_at' => 'integer',
@@ -49,6 +50,7 @@ class Playlist extends Model
             'importedFrom' => $this->imported_from,
             'screenOff' => $this->screen_off ?: null,
             'shareToken' => $this->share_token,
+            'isPublic' => $this->is_public ?: null,
             'createdAt' => $this->created_at,
             'updatedAt' => $this->updated_at,
             'playedAt' => $this->played_at,
@@ -65,6 +67,8 @@ class Playlist extends Model
             'cover' => $this->cover,
             'tracks' => $this->tracks ?? [],
             'owner' => $this->user->name,
+            'ownerHandle' => $this->user->handle,
+            'ownerAvatar' => $this->user->toPublic()['avatar'],
             'updatedAt' => $this->updated_at,
         ];
     }

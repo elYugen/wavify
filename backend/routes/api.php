@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\MusicController;
 use App\Http\Controllers\PlaylistController;
+use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SpotifyAuthController;
 use App\Http\Controllers\StreamController;
 use Illuminate\Support\Facades\Route;
@@ -23,6 +24,11 @@ Route::get('/stream/youtube/{id}', [StreamController::class, 'youtube'])->middle
 // Playlists partagées : publiques, par lien.
 Route::get('/shared/{token}', [PlaylistController::class, 'shared'])->middleware('throttle:60,1');
 
+// Profils publics.
+Route::get('/users', [ProfileController::class, 'search'])->middleware('throttle:60,1');
+Route::get('/users/{handle}', [ProfileController::class, 'show'])->middleware('throttle:60,1');
+Route::get('/users/{handle}/{kind}', [ProfileController::class, 'file'])->whereIn('kind', ['avatar', 'banner']);
+
 Route::prefix('auth')->group(function () {
     Route::middleware('throttle:10,1')->group(function () {
         Route::post('/register', [AuthController::class, 'register']);
@@ -41,4 +47,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/playlists/{uid}', [PlaylistController::class, 'destroy']);
     Route::post('/playlists/{uid}/share', [PlaylistController::class, 'share']);
     Route::delete('/playlists/{uid}/share', [PlaylistController::class, 'unshare']);
+    Route::put('/profile', [ProfileController::class, 'update']);
+    Route::post('/profile/{kind}', [ProfileController::class, 'image'])->whereIn('kind', ['avatar', 'banner']);
 });

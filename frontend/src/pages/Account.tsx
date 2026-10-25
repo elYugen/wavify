@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { CloudCheck, CloudOff, LogOut, RefreshCw, UserRound } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronRight, CloudCheck, CloudOff, LogOut, RefreshCw, UserRound } from 'lucide-react';
 import { useAuth } from '../store/auth';
 import { useLibrary } from '../store/library';
 import { toast } from '../store/toast';
 import { mergeAfterLogin, pull, signOut, useSync } from '../lib/sync';
 import { plural } from '../lib/format';
+import { Avatar } from '../components/Avatar';
 
 const field =
   'w-full rounded-2xl bg-white/[.06] px-4 py-3.5 text-[15px] outline-none ring-accent/60 transition placeholder:text-muted focus:ring-2';
@@ -101,15 +103,15 @@ function Profile() {
   const offline = status === 'offline';
   return (
     <div className="mx-auto max-w-md space-y-3">
-      <div className="flex items-center gap-4 rounded-[28px] bg-surface p-5 ring-1 ring-white/[.06]">
-        <span className="bg-sunset grid size-14 shrink-0 place-items-center rounded-2xl font-display text-2xl font-extrabold text-on-accent">
-          {user.name.slice(0, 1).toUpperCase()}
-        </span>
-        <div className="min-w-0">
+      <Link to={`/u/${user.handle}`} className="flex items-center gap-4 rounded-[28px] bg-surface p-5 ring-1 ring-white/[.06] transition hover:bg-white/[.04]">
+        <Avatar user={user} className="size-14" text="text-2xl" />
+        <div className="min-w-0 flex-1">
           <div className="truncate font-display text-xl font-bold">{user.name}</div>
-          <div className="truncate text-sm text-muted">{user.email}</div>
+          <div className="truncate text-sm text-muted">@{user.handle} · {user.email}</div>
+          <div className="mt-1 text-xs font-bold text-accent-2">Voir et modifier mon profil</div>
         </div>
-      </div>
+        <ChevronRight className="size-5 text-muted" />
+      </Link>
 
       <div className="rounded-[28px] bg-surface p-5 ring-1 ring-white/[.06]">
         <div className="flex items-center gap-3">

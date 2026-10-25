@@ -59,6 +59,12 @@ Avec un compte (page **Compte**, icône en haut de l'accueil), les playlists, co
 - entre deux appareils, la version la plus récente d'une playlist gagne, et une playlist supprimée ne revient pas ;
 - la déconnexion vide l'appareil (tout reste sur le compte).
 
+### Profils
+
+Chaque compte a un profil public `https://music.lleroy.fr/u/pseudo` : photo, bannière, nom, pseudo, bio et playlists publiques. On le modifie depuis la page **Compte** (« Voir et modifier mon profil »). Les profils se trouvent dans **Explorer** (section « Profils ») et depuis le nom affiché sur une playlist partagée.
+
+Une playlist devient publique avec « Afficher sur mon profil » dans sa fenêtre **Partager** (elle reçoit alors un lien de partage). Les images sont recadrées dans le navigateur (photo 400 × 400, bannière 1500 × 500), vérifiées par le serveur puis stockées dans `backend/storage/app/private/profiles` et servies par `/api/users/{pseudo}/avatar|banner`.
+
 ### Partage de playlists
 
 Bouton **Partager** d'une playlist (compte requis) : crée un lien public `https://music.lleroy.fr/s/…`. Toute personne qui l'ouvre, même sans compte, peut écouter la playlist (toujours la dernière version) et l'ajouter à sa collection. « Arrêter le partage » rend le lien inutilisable ; supprimer la playlist aussi.

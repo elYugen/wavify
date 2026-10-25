@@ -13,7 +13,7 @@ interface LibraryState {
     name: string,
     opts?: { description?: string; tracks?: Track[]; cover?: string; importedFrom?: string },
   ) => string;
-  updatePlaylist: (id: string, patch: Partial<Pick<Playlist, 'name' | 'description' | 'tracks' | 'cover' | 'screenOff'>>) => void;
+  updatePlaylist: (id: string, patch: Partial<Pick<Playlist, 'name' | 'description' | 'tracks' | 'cover' | 'screenOff' | 'isPublic'>>) => void;
   /** Option « Écran coupé » d'une playlist (ou des coups de cœur avec 'liked'). */
   setScreenOff: (contextId: string, on: boolean) => void;
   /** Lien de partage reçu du serveur : ne change pas la date de modification. */
@@ -66,7 +66,8 @@ export const useLibrary = create<LibraryState>()(
         contextId === 'liked' ? set({ likedScreenOff: on }) : get().updatePlaylist(contextId, { screenOff: on }),
 
       setShareToken: (id, token) =>
-        set((s) => ({ playlists: s.playlists.map((p) => (p.id === id ? { ...p, shareToken: token } : p)) })),
+        // Sans lien, la playlist n'est plus publique non plus (comme côté serveur).
+        set((s) => ({ playlists: s.playlists.map((p) => (p.id === id ? { ...p, shareToken: token, ...(token ? {} : { isPublic: false }) } : p)) })),
 
       deletePlaylist: (id) => set((s) => ({ playlists: s.playlists.filter((p) => p.id !== id) })),
 

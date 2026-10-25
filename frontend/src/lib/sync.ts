@@ -128,6 +128,8 @@ async function sendAll() {
         if (r.stale) applyPlaylist(id, r.playlist);
         // Modifiée pendant l'envoi : elle reste dans la file pour repartir.
         else if (useLibrary.getState().playlists.find((x) => x.id === id) !== p) continue;
+        // Rendue publique : le serveur a créé le lien de partage.
+        else if (r.playlist?.shareToken !== p.shareToken) applyPlaylist(id, { ...p, shareToken: r.playlist?.shareToken });
       } catch (e) {
         if (!rejected(e)) throw e;
         console.warn(`Playlist ${id} refusée par le serveur`, e);

@@ -1,7 +1,9 @@
-import { useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { History, Search as SearchIcon, X } from 'lucide-react';
-import type { Source } from '../types';
+import type { PublicUser, Source } from '../types';
+import { searchUsers } from '../lib/api';
+import { Avatar } from '../components/Avatar';
 import { useSearch } from '../lib/useSearch';
 import { useLibrary } from '../store/library';
 import { usePlayer } from '../store/player';
@@ -15,6 +17,33 @@ import { Artwork } from '../components/Artwork';
 import { PlayCircle } from '../components/PlayCircle';
 import { SourceIcon } from '../components/SourceIcon';
 import { MoodChip } from '../components/MoodChip';
+
+/** Profils Wavify correspondant à la recherche (nom ou pseudo). */
+function ProfileResults({ q }: { q: string }) {
+  const [users, setUsers] = useState<PublicUser[]>([]);
+  useEffect(() => {
+    const v = q.trim();
+    if (v.length < 2) return setUsers([]);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => searchUsers(v, ctrl.signal).then(setUsers).catch(() => {}), 400);
+    return () => (clearTimeout(t), ctrl.abort());
+  }, [q]);
+  if (!users.length) return null;
+  return (
+    <div className="px-4 pb-2 pt-1 md:px-3">
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-[.2em] text-muted">Profils</p>
+      <div className="no-scrollbar -mx-1 flex gap-3 overflow-x-auto px-1">
+        {users.map((u) => (
+          <Link key={u.handle} to={`/u/${u.handle}`} className="flex w-[88px] shrink-0 flex-col items-center gap-1.5 text-center">
+            <Avatar user={u} className="size-16" text="text-2xl" />
+            <span className="w-full truncate text-sm font-bold">{u.name}</span>
+            <span className="-mt-1 w-full truncate text-[11px] text-muted">@{u.handle}</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Search() {
   const [params, setParams] = useSearchParams();
@@ -98,6 +127,7 @@ export default function Search() {
 
       {q.trim() && (
         <div className="md:px-4">
+          <ProfileResults q={q} />
           {loading && <RowSkeleton count={8} />}
           {!loading && error && (
             <div className="mx-4 mt-6 rounded-3xl bg-white/[.04] px-4 py-10 text-center">

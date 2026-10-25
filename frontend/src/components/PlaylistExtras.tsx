@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Copy, Link2, LoaderCircle, Moon, Share2 } from 'lucide-react';
+import { Copy, Globe, Link2, LoaderCircle, Moon, Share2 } from 'lucide-react';
 import type { Playlist } from '../types';
 import { HttpError, sharePlaylist, unsharePlaylist } from '../lib/api';
 import { flush } from '../lib/sync';
@@ -42,6 +42,7 @@ export function ScreenOffToggle({ contextId }: { contextId: string }) {
 export function ShareSheet({ playlist, open, onClose }: { playlist: Playlist; open: boolean; onClose: () => void }) {
   const user = useAuth((s) => s.user);
   const setShareToken = useLibrary((s) => s.setShareToken);
+  const updatePlaylist = useLibrary((s) => s.updatePlaylist);
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const url = playlist.shareToken ? `${location.origin}/s/${playlist.shareToken}` : null;
@@ -70,6 +71,31 @@ export function ShareSheet({ playlist, open, onClose }: { playlist: Playlist; op
   };
 
   const send = () => navigator.share({ title: playlist.name, text: `Écoute « ${playlist.name} » sur Wavify`, url: url! }).catch(() => {});
+
+  /** Afficher sur le profil : le serveur crée alors le lien de partage s'il n'existe pas. */
+  const togglePublic = async () => {
+    setBusy(true);
+    updatePlaylist(playlist.id, { isPublic: !playlist.isPublic });
+    const ok = await flush();
+    setBusy(false);
+    if (!ok) toast('Hors ligne : ce sera appliqué au retour du réseau');
+    else toast(playlist.isPublic ? 'Retirée de ton profil' : 'Visible sur ton profil');
+  };
+
+  const publicRow = (
+    <button onClick={togglePublic} disabled={busy} className="flex w-full items-center gap-3 rounded-2xl bg-white/[.04] p-3 text-left ring-1 ring-white/[.06] disabled:opacity-60">
+      <span className={`grid size-10 place-items-center rounded-xl ${playlist.isPublic ? 'bg-emerald-400/15 text-emerald-300' : 'bg-white/[.06] text-white/70'}`}>
+        <Globe className="size-5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-bold">Afficher sur mon profil</span>
+        <span className="block text-xs text-muted">{playlist.isPublic ? 'Visible par tous sur ta page' : 'Seules les personnes qui ont le lien la voient'}</span>
+      </span>
+      <span className={`h-6 w-11 rounded-full p-0.5 transition ${playlist.isPublic ? 'bg-emerald-400' : 'bg-white/15'}`}>
+        <span className={`block size-5 rounded-full bg-white transition ${playlist.isPublic ? 'translate-x-5' : ''}`} />
+      </span>
+    </button>
+  );
 
   const revoke = async () => {
     setBusy(true);
@@ -102,6 +128,7 @@ export function ShareSheet({ playlist, open, onClose }: { playlist: Playlist; op
             <button onClick={create} disabled={busy} className="bg-sunset flex w-full items-center justify-center gap-2 rounded-full py-3 font-bold text-on-accent disabled:opacity-60">
               {busy ? <LoaderCircle className="size-5 animate-spin" /> : <Link2 className="size-5" />} Créer le lien de partage
             </button>
+            {publicRow}
           </>
         ) : (
           <>
@@ -121,6 +148,7 @@ export function ShareSheet({ playlist, open, onClose }: { playlist: Playlist; op
                 <Copy className="size-5" /> Copier le lien
               </button>
             </div>
+            {publicRow}
             <button onClick={revoke} disabled={busy} className="w-full py-2 text-sm font-semibold text-red-300 hover:text-red-200 disabled:opacity-60">
               Arrêter le partage
             </button>

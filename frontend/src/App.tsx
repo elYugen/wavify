@@ -7,6 +7,7 @@ import PlaylistPage from './pages/PlaylistPage';
 import Import from './pages/Import';
 import Account from './pages/Account';
 import Shared from './pages/Shared';
+import Profile from './pages/Profile';
 
 function PlaylistRoute() {
   const { id } = useParams();
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="import" element={<Import />} />
         <Route path="account" element={<Account />} />
         <Route path="s/:token" element={<Shared />} />
+        <Route path="u/:handle" element={<Profile />} />
         <Route path="*" element={<Home />} />
       </Route>
     </Routes>

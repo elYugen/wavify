@@ -22,6 +22,7 @@ class PlaylistController extends Controller
             'updatedAt' => ['required', 'integer', 'min:0'],
             'playedAt' => ['nullable', 'integer', 'min:0'],
             'screenOff' => ['nullable', 'boolean'],
+            'isPublic' => ['nullable', 'boolean'],
         ]);
 
         $playlist = $request->user()->playlists()->firstOrNew(['uid' => $uid]);
@@ -46,6 +47,9 @@ class PlaylistController extends Controller
             'imported_from' => $data['importedFrom'] ?? null,
             'tracks' => Tracks::clean($data['tracks']),
             'screen_off' => (bool) ($data['screenOff'] ?? false),
+            'is_public' => $public = (bool) ($data['isPublic'] ?? false),
+            // Une playlist publique est ouverte depuis le profil par son lien de partage.
+            'share_token' => $public ? ($playlist->share_token ?: Str::random(24)) : $playlist->share_token,
             'created_at' => $playlist->exists && ! $deleted ? $playlist->created_at : $data['createdAt'],
             'updated_at' => $data['updatedAt'],
             'played_at' => $data['playedAt'] ?? null,
@@ -63,7 +67,7 @@ class PlaylistController extends Controller
             'created_at' => 0,
             'updated_at' => 0,
         ]);
-        $playlist->fill(['tracks' => [], 'cover' => null, 'share_token' => null, 'deleted_at' => (int) floor(microtime(true) * 1000)])->save();
+        $playlist->fill(['tracks' => [], 'cover' => null, 'share_token' => null, 'is_public' => false, 'deleted_at' => (int) floor(microtime(true) * 1000)])->save();
 
         return response()->noContent();
     }
@@ -82,7 +86,8 @@ class PlaylistController extends Controller
     /** Révoque le lien : il ne fonctionnera plus, même pour ceux qui l'ont reçu. */
     public function unshare(Request $request, string $uid)
     {
-        $request->user()->playlists()->where('uid', $uid)->update(['share_token' => null]);
+        // Sans lien, elle ne peut plus être publique.
+        $request->user()->playlists()->where('uid', $uid)->update(['share_token' => null, 'is_public' => false]);
 
         return response()->noContent();
     }

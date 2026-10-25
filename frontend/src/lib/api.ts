@@ -1,4 +1,4 @@
-import type { SharedPlaylist, Source, SpotifyImport, Track } from '../types';
+import type { PublicProfile, PublicUser, SharedPlaylist, Source, SpotifyImport, Track } from '../types';
 
 type RawTrack = Omit<Track, 'id'>;
 
@@ -67,6 +67,12 @@ export function fetchSpotify(url: string, spotifyToken?: string | null) {
 
 export function audiusStreamUrl(id: string) {
   return `https://api.audius.co/v1/tracks/${encodeURIComponent(id)}/stream?app_name=wavify-pwa`;
+}
+
+export const fetchProfile = (handle: string) => getJson<PublicProfile>(`/api/users/${encodeURIComponent(handle)}`);
+
+export async function searchUsers(q: string, signal?: AbortSignal) {
+  return (await getJson<{ users: PublicUser[] }>(`/api/users?q=${encodeURIComponent(q)}`, signal)).users;
 }
 
 export const fetchShared = (token: string) => getJson<SharedPlaylist>(`/api/shared/${encodeURIComponent(token)}`);

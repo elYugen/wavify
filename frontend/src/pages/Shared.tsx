@@ -12,6 +12,7 @@ import { PlayCircle } from '../components/PlayCircle';
 import { StickyBar } from '../components/PageHeader';
 import { TrackRow } from '../components/TrackRow';
 import { RowSkeleton } from '../components/Skeleton';
+import { Avatar } from '../components/Avatar';
 
 /** Playlist ouverte depuis un lien de partage (/s/:token) : écoute et ajout à sa collection. */
 export default function Shared() {
@@ -75,7 +76,10 @@ export default function Shared() {
       <header className="relative flex flex-col items-center gap-6 px-4 pb-4 pt-2 md:flex-row md:items-end md:px-7 md:pt-4">
         <PlaylistCover playlist={asPlaylist} rounded="rounded-3xl" className="size-[200px] shrink-0 shadow-[0_24px_60px_rgba(0,0,0,.55)] md:size-[220px]" />
         <div className="w-full min-w-0 text-center md:text-left">
-          <p className="text-[11px] font-bold uppercase tracking-[.22em] text-accent-2">Partagée par {data.owner}</p>
+          <Link to={`/u/${data.ownerHandle}`} className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.22em] text-accent-2 hover:text-white">
+            <Avatar user={{ name: data.owner, handle: data.ownerHandle, avatar: data.ownerAvatar }} className="size-6" text="text-xs" />
+            Partagée par {data.owner}
+          </Link>
           <h1 className="mt-1 line-clamp-2 font-display text-[34px] font-extrabold leading-[1.02] tracking-tight md:text-[clamp(2.75rem,5.5vw,4.75rem)]">{data.name}</h1>
           {data.description && <p className="mt-2 text-sm text-white/70">{data.description}</p>}
           <div className="mt-3 flex flex-wrap justify-center gap-2 md:justify-start">
