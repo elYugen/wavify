@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, CircleAlert, ClipboardPaste, FileUp, Info, LoaderCircle, Search as SearchIcon, X } from 'lucide-react';
+import { Check, CircleAlert, ClipboardPaste, FileUp, Info, LoaderCircle, RotateCw, Search as SearchIcon, WifiOff, X } from 'lucide-react';
 import type { Source, SpotifyImport, Track } from '../types';
-import { fetchSpotify, spotifyApiEnabled } from '../lib/api';
+import { HttpError, fetchSpotify, spotifyApiEnabled } from '../lib/api';
 import { csvToImport } from '../lib/csv';
 import { matchTrack, pool } from '../lib/match';
 import { useLibrary } from '../store/library';
@@ -13,9 +13,36 @@ import { SOURCES } from '../lib/sources';
 import { SourceTabs } from '../components/SourceTabs';
 import { Artwork } from '../components/Artwork';
 
-type Status = 'pending' | 'searching' | 'found' | 'missing';
+type Status = 'pending' | 'searching' | 'found' | 'missing' | 'error';
 
 const LIST_MAX = 150; // au-delà, on n'affiche que les titres à problème
+const JOB_KEY = 'wavify-import-job';
+
+interface SavedJob {
+  data: SpotifyImport;
+  url: string;
+  source: Source;
+  id: string;
+  found: (Track | null)[];
+  st: Status[];
+}
+
+/** L'import en cours est sauvegardé pour survivre à un rechargement ou à la fermeture de l'app. */
+const saveJob = (j: SavedJob | null) => {
+  try {
+    if (j) localStorage.setItem(JOB_KEY, JSON.stringify(j));
+    else localStorage.removeItem(JOB_KEY);
+  } catch {
+    /* stockage plein ou indisponible */
+  }
+};
+const loadJob = (): SavedJob | null => {
+  try {
+    return JSON.parse(localStorage.getItem(JOB_KEY) || 'null');
+  } catch {
+    return null;
+  }
+};
 
 export default function Import() {
   const [url, setUrl] = useState('');
@@ -28,15 +55,36 @@ export default function Import() {
   const [playlistId, setPlaylistId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const abort = useRef<AbortController | null>(null);
+  const [paused, setPaused] = useState<string | null>(null);
+  // État de l'import conservé entre une pause et une reprise
+  const job = useRef<{ id: string; found: (Track | null)[]; st: Status[] } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [apiOn, setApiOn] = useState<boolean | null>(null);
   useEffect(() => {
     spotifyApiEnabled().then(setApiOn);
+    // Reprise d'un import interrompu (rechargement, app fermée, serveur coupé…)
+    const saved = loadJob();
+    if (!saved || !useLibrary.getState().playlists.some((p) => p.id === saved.id)) return saveJob(null);
+    const st = saved.st.map((s) => (s === 'searching' ? 'error' : s));
+    job.current = { id: saved.id, found: saved.found, st };
+    setData(saved.data);
+    setUrl(saved.url);
+    setSource(saved.source);
+    setStatuses(st);
+    setMatches(saved.found);
+    setPlaylistId(saved.id);
+    const left = st.filter((s) => s === 'pending' || s === 'error').length;
+    setPaused(`Import interrompu : il reste ${plural(left, 'titre')} à chercher. Tu peux reprendre là où tu t'étais arrêté.`);
   }, []);
+  // Quitter la page met l'import en pause (il reste sauvegardé et reprenable)
+  useEffect(() => () => abort.current?.abort(), []);
 
   const load = (d: SpotifyImport) => {
     if (!d.tracks.length) throw new Error('Cette playlist est vide');
     setData(d);
+    setPaused(null);
+    job.current = null;
+    saveJob(null);
     setStatuses(d.tracks.map(() => 'pending'));
     setMatches(d.tracks.map(() => null));
   };
@@ -84,47 +132,74 @@ export default function Import() {
     if (!data) return;
     const ctrl = (abort.current = new AbortController());
     setRunning(true);
-    const id = createPlaylist(data.name, {
-      description: `Importée de Spotify${data.owner ? ` · ${data.owner}` : ''}`,
-      importedFrom: data.via === 'csv' ? `csv:${data.id}` : url,
-    });
-    setPlaylistId(id);
-    const found: (Track | null)[] = data.tracks.map(() => null);
-    const st: Status[] = data.tracks.map(() => 'pending');
-    let done = 0;
+    setPaused(null);
+    if (!job.current) {
+      const id = createPlaylist(data.name, {
+        description: `Importée de Spotify${data.owner ? ` · ${data.owner}` : ''}`,
+        importedFrom: data.via === 'csv' ? `csv:${data.id}` : url,
+      });
+      job.current = { id, found: data.tracks.map(() => null), st: data.tracks.map(() => 'pending') };
+      setPlaylistId(id);
+    }
+    const { id, found, st } = job.current;
+    // Reprise : on ne retraite que les titres en attente ou en erreur
+    const todo = data.tracks.map((t, i) => ({ t, i })).filter(({ i }) => st[i] === 'pending' || st[i] === 'error' || st[i] === 'searching');
+    todo.forEach(({ i }) => (st[i] = 'pending'));
     const flush = () => {
       setStatuses([...st]);
       setMatches([...found]);
       const seen = new Set<string>();
       updatePlaylist(id, { tracks: found.filter((t): t is Track => !!t && !seen.has(t.id) && !!seen.add(t.id)) });
+      saveJob({ data, url, source, id, found, st });
     };
+    let done = 0;
+    let offline = 0;
+    let lastError = '';
     await pool(
-      data.tracks,
+      todo,
       4,
-      async (t, i) => {
+      async ({ t, i }) => {
         st[i] = 'searching';
         setStatuses([...st]);
         try {
           found[i] = await matchTrack(source, t);
-        } catch {
-          found[i] = null;
+          st[i] = found[i] ? 'found' : 'missing';
+          offline = 0;
+        } catch (e) {
+          st[i] = 'error';
+          lastError = e instanceof Error ? e.message : 'Erreur inconnue';
+          // Serveur injoignable plusieurs fois d'affilée : on met l'import en pause
+          if (e instanceof HttpError && e.status === 0 && ++offline >= 3 && !ctrl.signal.aborted) {
+            ctrl.abort();
+            setPaused('Le serveur Wavify ne répond plus. Vérifie que « npm run dev » tourne toujours, puis reprends.');
+          }
         }
-        st[i] = found[i] ? 'found' : 'missing';
-        if (++done % (data.tracks.length > 200 ? 15 : 4) === 0 || done === data.tracks.length) flush();
+        if (++done % (todo.length > 200 ? 15 : 4) === 0 || done === todo.length) flush();
         else setStatuses([...st]);
       },
       ctrl.signal,
     );
+    st.forEach((s, i) => s === 'searching' && (st[i] = 'error'));
     flush();
     setRunning(false);
     const n = found.filter(Boolean).length;
-    toast(ctrl.signal.aborted ? `Import interrompu (${n} titres)` : `${n}/${data.tracks.length} titres importés`);
+    const errors = st.filter((s) => s === 'error').length;
+    if (ctrl.signal.aborted) {
+      setPaused((p) => p || `Import en pause : ${n} titres ajoutés, ${st.filter((s) => s === 'pending' || s === 'error').length} restants.`);
+      toast('Import en pause');
+    } else if (errors) {
+      setPaused(`${plural(errors, 'titre')} en erreur (${lastError}). Tu peux les réessayer.`);
+      toast(`${n}/${data.tracks.length} titres importés`);
+    } else {
+      saveJob(null); // terminé sans erreur : plus rien à reprendre
+      toast(`${n}/${data.tracks.length} titres importés`);
+    }
   };
 
   const foundCount = statuses.filter((s) => s === 'found').length;
   const doneCount = statuses.filter((s) => s === 'found' || s === 'missing').length;
   const progress = data ? (doneCount / data.tracks.length) * 100 : 0;
-  const finished = !!playlistId && !running;
+  const finished = !!playlistId && !running && !paused;
 
   return (
     <div className="relative">
@@ -249,17 +324,32 @@ export default function Import() {
               <div className="mt-6">
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-semibold">
-                    {running ? 'Recherche des titres…' : 'Import terminé'} · {foundCount}/{data.tracks.length} trouvés
+                    {running ? 'Recherche des titres…' : paused ? 'Import en pause' : 'Import terminé'} · {foundCount}/{data.tracks.length} trouvés
                   </span>
                   {running && (
                     <button onClick={() => abort.current?.abort()} className="flex items-center gap-1 text-muted hover:text-white">
-                      <X className="size-4" /> Arrêter
+                      <X className="size-4" /> Pause
                     </button>
                   )}
                 </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
                   <div className="bg-sunset h-full rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
                 </div>
+                {paused && !running && (
+                  <div className="mt-4 rounded-3xl bg-red-500/10 p-4 ring-1 ring-red-400/25">
+                    <p className="flex items-start gap-2 text-sm text-white/90">
+                      <WifiOff className="mt-0.5 size-4 shrink-0 text-red-300" /> {paused}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button onClick={run} className="bg-sunset flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold text-on-accent transition active:scale-95">
+                        <RotateCw className="size-4" /> Reprendre l'import
+                      </button>
+                      <Link to={`/playlist/${playlistId}`} className="rounded-full bg-white/10 px-5 py-2.5 text-sm font-bold hover:bg-white/15">
+                        Voir la playlist
+                      </Link>
+                    </div>
+                  </div>
+                )}
                 {finished && (
                   <div className="mt-4 flex flex-wrap gap-3">
                     <Link to={`/playlist/${playlistId}`} className="rounded-full bg-white px-6 py-3 font-bold text-ink transition hover:scale-[1.03]">
@@ -287,7 +377,7 @@ export default function Import() {
               {data.tracks.map((t, i) => {
                 const s = statuses[i];
                 if (data.tracks.length > LIST_MAX) {
-                  if (playlistId ? s !== 'missing' && s !== 'searching' : i >= LIST_MAX) return null;
+                  if (playlistId ? s !== 'missing' && s !== 'searching' && s !== 'error' : i >= LIST_MAX) return null;
                 }
                 const m = matches[i];
                 return (
@@ -300,6 +390,7 @@ export default function Import() {
                     </div>
                     {s === 'searching' && <LoaderCircle className="size-5 animate-spin text-muted" />}
                     {s === 'found' && <Check className="size-5 text-accent-2" />}
+                    {s === 'error' && <span title="Erreur réseau, sera réessayé"><RotateCw className="size-4 text-red-300" /></span>}
                     {s === 'missing' && (
                       <Link to={`/search?q=${encodeURIComponent(`${t.artist.split(',')[0]} ${t.title}`)}`} className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold hover:bg-white/20">
                         <SearchIcon className="size-3.5" /> Chercher

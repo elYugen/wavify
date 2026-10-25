@@ -12,7 +12,9 @@ interface LibraryState {
     name: string,
     opts?: { description?: string; tracks?: Track[]; cover?: string; importedFrom?: string },
   ) => string;
-  updatePlaylist: (id: string, patch: Partial<Pick<Playlist, 'name' | 'description' | 'tracks'>>) => void;
+  updatePlaylist: (id: string, patch: Partial<Pick<Playlist, 'name' | 'description' | 'tracks' | 'cover'>>) => void;
+  removeTracks: (id: string, trackIds: string[]) => void;
+  unlikeMany: (trackIds: string[]) => void;
   deletePlaylist: (id: string) => void;
   addTracks: (id: string, tracks: Track[]) => number;
   removeTrack: (id: string, trackId: string) => void;
@@ -63,6 +65,18 @@ export const useLibrary = create<LibraryState>()(
         const fresh = tracks.filter((t) => !have.has(t.id) && have.add(t.id));
         if (fresh.length) get().updatePlaylist(id, { tracks: [...p.tracks, ...fresh] });
         return fresh.length;
+      },
+
+      removeTracks: (id, trackIds) => {
+        const drop = new Set(trackIds);
+        set((s) => ({
+          playlists: s.playlists.map((p) => (p.id === id ? touch(p, { tracks: p.tracks.filter((t) => !drop.has(t.id)) }) : p)),
+        }));
+      },
+
+      unlikeMany: (trackIds) => {
+        const drop = new Set(trackIds);
+        set((s) => ({ liked: s.liked.filter((t) => !drop.has(t.id)) }));
       },
 
       removeTrack: (id, trackId) =>

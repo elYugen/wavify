@@ -1,5 +1,5 @@
 import type { Source, Track } from '../types';
-import { searchTracks } from './api';
+import { HttpError, searchTracks } from './api';
 
 const norm = (s: string) =>
   s
@@ -38,10 +38,24 @@ export function bestMatch(target: { title: string; artist: string; duration: num
   return bestScore > 5 ? best : null;
 }
 
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Cherche un titre. Renvoie null s'il est introuvable.
+ * Lève une HttpError si le serveur reste injoignable ou en erreur après plusieurs essais.
+ */
 export async function matchTrack(source: Source, target: { title: string; artist: string; duration: number }) {
   const primary = target.artist.split(',')[0];
-  const results = await searchTracks(source, `${primary} ${target.title}`);
-  return bestMatch(target, results);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const results = await searchTracks(source, `${primary} ${target.title}`.trim());
+      return bestMatch(target, results);
+    } catch (e) {
+      const retryable = e instanceof HttpError && (e.status === 0 || e.status === 429 || e.status >= 500);
+      if (!retryable || attempt >= 2) throw e;
+      await wait(700 * 2 ** attempt); // 0,7 s puis 1,4 s
+    }
+  }
 }
 
 /** Exécute des tâches avec une concurrence limitée. */
