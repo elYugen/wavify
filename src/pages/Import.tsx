@@ -1,0 +1,251 @@
+import { useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Check, CircleAlert, ClipboardPaste, LoaderCircle, Search as SearchIcon, X } from 'lucide-react';
+import type { Source, SpotifyImport, Track } from '../types';
+import { fetchSpotify } from '../lib/api';
+import { matchTrack, pool } from '../lib/match';
+import { useLibrary } from '../store/library';
+import { usePlayer } from '../store/player';
+import { toast } from '../store/toast';
+import { plural } from '../lib/format';
+import { SOURCES } from '../lib/sources';
+import { SourceTabs } from '../components/SourceTabs';
+import { Artwork } from '../components/Artwork';
+
+type Status = 'pending' | 'searching' | 'found' | 'missing';
+
+export default function Import() {
+  const [url, setUrl] = useState('');
+  const [data, setData] = useState<SpotifyImport | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<Source>('youtube');
+  const [statuses, setStatuses] = useState<Status[]>([]);
+  const [matches, setMatches] = useState<(Track | null)[]>([]);
+  const [playlistId, setPlaylistId] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const abort = useRef<AbortController | null>(null);
+  const { createPlaylist, updatePlaylist } = useLibrary();
+  const playQueue = usePlayer((s) => s.playQueue);
+
+  const analyse = async (value = url) => {
+    if (!value.trim()) return;
+    setFetching(true);
+    setError(null);
+    setData(null);
+    setPlaylistId(null);
+    try {
+      const d = await fetchSpotify(value.trim());
+      if (!d.tracks.length) throw new Error('Cette playlist est vide');
+      setData(d);
+      setStatuses(d.tracks.map(() => 'pending'));
+      setMatches(d.tracks.map(() => null));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const paste = async () => {
+    try {
+      const t = await navigator.clipboard.readText();
+      setUrl(t);
+      analyse(t);
+    } catch {
+      toast('Colle le lien manuellement');
+    }
+  };
+
+  const run = async () => {
+    if (!data) return;
+    const ctrl = (abort.current = new AbortController());
+    setRunning(true);
+    const id = createPlaylist(data.name, {
+      description: `Importée de Spotify${data.owner ? ` · ${data.owner}` : ''}`,
+      importedFrom: url,
+    });
+    setPlaylistId(id);
+    const found: (Track | null)[] = data.tracks.map(() => null);
+    const st: Status[] = data.tracks.map(() => 'pending');
+    let done = 0;
+    const flush = () => {
+      setStatuses([...st]);
+      setMatches([...found]);
+      const seen = new Set<string>();
+      updatePlaylist(id, { tracks: found.filter((t): t is Track => !!t && !seen.has(t.id) && !!seen.add(t.id)) });
+    };
+    await pool(
+      data.tracks,
+      3,
+      async (t, i) => {
+        st[i] = 'searching';
+        setStatuses([...st]);
+        try {
+          found[i] = await matchTrack(source, t);
+        } catch {
+          found[i] = null;
+        }
+        st[i] = found[i] ? 'found' : 'missing';
+        if (++done % 4 === 0 || done === data.tracks.length) flush();
+        else setStatuses([...st]);
+      },
+      ctrl.signal,
+    );
+    flush();
+    setRunning(false);
+    const n = found.filter(Boolean).length;
+    toast(ctrl.signal.aborted ? `Import interrompu (${n} titres)` : `${n}/${data.tracks.length} titres importés`);
+  };
+
+  const foundCount = statuses.filter((s) => s === 'found').length;
+  const doneCount = statuses.filter((s) => s === 'found' || s === 'missing').length;
+  const progress = data ? (doneCount / data.tracks.length) * 100 : 0;
+  const finished = !!playlistId && !running;
+
+  return (
+    <div className="relative">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-96 overflow-hidden">
+        <div className="absolute -left-20 -top-32 size-96 rounded-full bg-[#1db954] opacity-[.14] blur-3xl" />
+        <div className="bg-sunset absolute -right-24 -top-24 size-80 rounded-full opacity-[.16] blur-3xl" />
+      </div>
+      <div className="relative mx-auto max-w-3xl px-4 pb-10 pt-[max(env(safe-area-inset-top),20px)] md:px-6 md:pt-8">
+        <p className="text-[11px] font-bold uppercase tracking-[.22em] text-accent-2">Déménagement</p>
+        <h1 className="mt-1 font-display text-[34px] font-extrabold leading-[1.02] tracking-tight md:text-5xl">
+          Ramène tes playlists Spotify<span className="text-sunset">.</span>
+        </h1>
+        <p className="mt-2 max-w-xl text-white/75">
+          Colle le lien d'une playlist ou d'un album <b>public</b>. Wavify retrouve chaque titre sur la source de ton choix et crée la playlist pour toi.
+        </p>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            analyse();
+          }}
+          className="mt-6 flex gap-2"
+        >
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://open.spotify.com/playlist/…"
+            className="min-w-0 flex-1 rounded-2xl bg-white/[.07] px-4 py-3.5 text-[15px] font-semibold outline-none ring-1 ring-white/[.08] placeholder:font-medium placeholder:text-muted focus:ring-2 focus:ring-accent/70"
+            inputMode="url"
+          />
+          {!url && 'clipboard' in navigator && (
+            <button type="button" onClick={paste} className="grid size-[52px] shrink-0 place-items-center rounded-2xl bg-white/[.07] transition hover:bg-white/15" aria-label="Coller">
+              <ClipboardPaste className="size-5" />
+            </button>
+          )}
+          <button disabled={fetching || !url} className="bg-sunset flex shrink-0 items-center gap-2 rounded-2xl px-5 font-bold text-on-accent transition enabled:hover:brightness-110 disabled:opacity-40">
+            {fetching ? <LoaderCircle className="size-5 animate-spin" /> : 'Analyser'}
+          </button>
+        </form>
+        {error && (
+          <p className="mt-3 flex items-center gap-2 text-sm text-red-300">
+            <CircleAlert className="size-4" /> {error}
+          </p>
+        )}
+
+        {!data && !error && (
+          <ol className="mt-8 grid gap-3 text-sm text-white/75 md:grid-cols-3">
+            {[
+              'Dans Spotify, ouvre ta playlist puis ⋯ › Partager › Copier le lien.',
+              'Colle le lien ici et appuie sur Analyser.',
+              'Choisis la source (YouTube recommandé) puis lance l’import.',
+            ].map((s, i) => (
+              <li key={i} className="flex gap-3 rounded-3xl bg-white/[.04] p-4 ring-1 ring-white/[.06] md:flex-col">
+                <span className="text-sunset font-display text-3xl font-extrabold leading-none">0{i + 1}</span>
+                {s}
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {data && (
+          <div className="mt-8">
+            <div className="flex items-center gap-4 rounded-[28px] bg-white/[.05] p-4 ring-1 ring-white/[.07]">
+              {data.cover ? <img src={data.cover} alt="" className="size-24 rounded-2xl object-cover shadow-xl" /> : <div className="size-24 rounded-2xl bg-white/10" />}
+              <div className="min-w-0">
+                <div className="text-xs font-semibold uppercase tracking-wider text-white/60">{data.kind === 'album' ? 'Album' : 'Playlist'} Spotify</div>
+                <div className="truncate font-display text-xl font-extrabold">{data.name}</div>
+                <div className="text-sm text-white/70">
+                  {data.owner && `${data.owner} · `}
+                  {plural(data.tracks.length, 'titre')}
+                </div>
+              </div>
+            </div>
+
+            {!playlistId && (
+              <div className="mt-6">
+                <div className="mb-2 text-sm font-semibold text-white/80">Chercher les titres sur</div>
+                <SourceTabs value={source} onChange={setSource} />
+                <p className="mt-2 text-xs text-muted">{SOURCES[source].hint}. YouTube trouve presque tout ; Audius a un catalogue plus restreint.</p>
+                <button onClick={run} className="bg-sunset mt-5 w-full rounded-full py-3.5 text-base font-bold text-on-accent shadow-[0_10px_30px_-8px_rgba(255,106,61,.7)] transition hover:brightness-110 active:scale-[.98] md:w-auto md:px-10">
+                  Importer {plural(data.tracks.length, 'titre')}
+                </button>
+              </div>
+            )}
+
+            {playlistId && (
+              <div className="mt-6">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-semibold">
+                    {running ? 'Recherche des titres…' : 'Import terminé'} · {foundCount}/{data.tracks.length} trouvés
+                  </span>
+                  {running && (
+                    <button onClick={() => abort.current?.abort()} className="flex items-center gap-1 text-muted hover:text-white">
+                      <X className="size-4" /> Arrêter
+                    </button>
+                  )}
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                  <div className="bg-sunset h-full rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+                </div>
+                {finished && (
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Link to={`/playlist/${playlistId}`} className="rounded-full bg-white px-6 py-3 font-bold text-ink transition hover:scale-[1.03]">
+                      Ouvrir la playlist
+                    </Link>
+                    {foundCount > 0 && (
+                      <button
+                        onClick={() => playQueue(matches.filter((m): m is Track => !!m), 0, playlistId)}
+                        className="bg-sunset rounded-full px-6 py-3 font-bold text-on-accent transition hover:scale-[1.03]"
+                      >
+                        Écouter
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-6 divide-y divide-white/[.04] rounded-[28px] bg-white/[.02] px-3 ring-1 ring-white/[.05]">
+              {data.tracks.map((t, i) => {
+                const s = statuses[i];
+                const m = matches[i];
+                return (
+                  <div key={i} className="flex items-center gap-3 py-2.5">
+                    <span className="w-6 text-right text-sm tabular-nums text-muted">{i + 1}</span>
+                    {m ? <Artwork track={m} className="size-10 shrink-0" /> : <div className="size-10 shrink-0 rounded-xl bg-white/[.06]" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{t.title}</div>
+                      <div className="truncate text-xs text-muted">{m && s === 'found' ? `→ ${m.title}` : t.artist}</div>
+                    </div>
+                    {s === 'searching' && <LoaderCircle className="size-5 animate-spin text-muted" />}
+                    {s === 'found' && <Check className="size-5 text-accent-2" />}
+                    {s === 'missing' && (
+                      <Link to={`/search?q=${encodeURIComponent(`${t.artist.split(',')[0]} ${t.title}`)}`} className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold hover:bg-white/20">
+                        <SearchIcon className="size-3.5" /> Chercher
+                      </Link>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

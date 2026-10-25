@@ -1,0 +1,126 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: 'Bricolage Grotesque', 'Manrope', ui-sans-serif, sans-serif;
+  --color-ink: #0b0a10;
+  --color-base: #121019;
+  --color-surface: #1a1722;
+  --color-elevated: #241f2e;
+  --color-muted: #a59fb4;
+  --color-accent: #ff6a3d;
+  --color-accent-2: #ffb547;
+  --color-lilac: #b9a2ff;
+  --color-on-accent: #1d0c05;
+}
+
+@utility bg-sunset {
+  background-image: linear-gradient(120deg, var(--color-accent) 0%, #ff8a3d 45%, var(--color-accent-2) 100%);
+}
+@utility text-sunset {
+  background-image: linear-gradient(120deg, var(--color-accent), var(--color-accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@utility glass {
+  background: rgb(26 23 34 / 0.72);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.5);
+  border: 1px solid rgb(255 255 255 / 0.07);
+}
+@utility grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ink);
+  color: #f6f3fb;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: rgb(255 106 61 / 0.4);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+main {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.2) transparent;
+}
+
+/* Vinyle : sillons + reflet */
+.vinyl {
+  background:
+    conic-gradient(from 30deg, transparent 0 10%, rgb(255 255 255 / 0.09) 14%, transparent 20% 55%, rgb(255 255 255 / 0.07) 60%, transparent 66%),
+    repeating-radial-gradient(circle at 50% 50%, #141218 0 1.5px, #1d1a23 2px 3px),
+    #121016;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.04), 0 24px 60px rgb(0 0 0 / 0.55);
+}
+
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+.spin-slow {
+  animation: spin-slow 7s linear infinite;
+}
+
+@keyframes eq {
+  0%, 100% { height: 25%; }
+  50% { height: 100%; }
+}
+.eq-bar {
+  height: 40%;
+  animation: eq 0.9s ease-in-out infinite;
+}
+
+@keyframes sheet {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes toast {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.animate-sheet { animation: sheet 0.34s cubic-bezier(0.2, 0.9, 0.25, 1); }
+.animate-fade { animation: fade 0.2s ease-out; }
+.animate-toast { animation: toast 0.25s ease-out; }
+.animate-rise { animation: rise 0.45s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+
+@media (min-width: 768px) {
+  .animate-sheet.rounded-t-3xl { animation: toast 0.25s ease-out; }
+}
