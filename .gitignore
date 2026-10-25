@@ -1,6 +1,6 @@
 node_modules
 dist
 dev-dist
-.vercel
+.vite
 .env*
 !.env.example
